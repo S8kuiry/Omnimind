@@ -14,8 +14,8 @@ function normalizeMarkdown(raw: string): string {
   return (
     raw
       // literal \n string → real newline
+     .replace(/\[Source:[^\]]*\]/gi, '')   // ✅ first line — nuclear option
       .replace(/\\n/g, '\n')
-      .replace(/([a-z\.\,\:\d])\*\*/g, '$1\n\n**')  // ✅ add this line
 
 
       // "**Heading**===" setext → ## heading

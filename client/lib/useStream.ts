@@ -94,11 +94,12 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
             continue
           }
 
-          const clean = raw
-            .replace(/\[Source:[^\]]*\]/g, '')
-            .replace(/\[SOURCES\].*$/g, '')
-            .replace(/\s{2,}/g, ' ')
+         const clean = raw
+  .replace(/\[Source:[^\]]*\]/gi, '')   // ← add 'i' flag for case insensitive
+  .replace(/\[SOURCES\].*$/g, '')
+  .replace(/\s{2,}/g, ' ')
 
+  
           if (!clean.trim()) continue
           fullResponse += clean
           setMessages(prev => prev.map(m =>

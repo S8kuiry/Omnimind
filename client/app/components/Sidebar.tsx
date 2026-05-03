@@ -229,7 +229,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
       <h3 className="text-sm font-medium text-white mb-2">Delete Chat?</h3>
       <p className="text-xs text-white/50 mb-6">This action cannot be undone. Are you sure you want to delete this conversation?</p>
       
-      <div className="flex gap-3 justify-end">
+      <div className="flex w-full gap-3 justify-center">
         <button 
           onClick={() => setChatToDelete(null)}
           className="px-3 py-1.5 text-xs text-white/40 hover:text-white transition-colors"
