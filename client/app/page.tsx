@@ -1,32 +1,31 @@
 'use client'
 
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import Login from "./components/Login";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
-export default function HomePage() {
-
+function SearchParamsHandler() {
   const searchParams = useSearchParams();
-    const router = useRouter();
-    useEffect(() => {
-        const error = searchParams.get("error");
-        
-        if (error === "ALREADY_EXISTS_WITH_EMAIL") {
-            toast.error("This email is registered via OTP. Please login with Email.");
-            // Clean the URL so the toast doesn't pop up again on refresh
-            router.replace("/"); 
-        }else if(error === "ALREADY_EXISTS_WITH_GOOGLE") {
-            toast.error("This email is registered via Google. Please login with Google.");
-            // Clean the URL so the toast doesn't pop up again on refresh
-            router.replace("/"); 
-        }
-        
-    }, [searchParams, router]);
+  const router = useRouter();
+  useEffect(() => {
+    const error = searchParams.get("error");
 
+    if (error === "ALREADY_EXISTS_WITH_EMAIL") {
+      toast.error("This email is registered via OTP. Please login with Email.");
+      router.replace("/");
+    } else if (error === "ALREADY_EXISTS_WITH_GOOGLE") {
+      toast.error("This email is registered via Google. Please login with Google.");
+      router.replace("/");
+    }
+  }, [searchParams, router]);
 
+  return null;
+}
+
+export default function HomePage() {
   const sceneRef = useRef<HTMLDivElement>(null);
 
   const starPositions: [number, number][] = [
@@ -116,6 +115,9 @@ export default function HomePage() {
 
   return (
     <>
+      <Suspense fallback={null}>
+        <SearchParamsHandler />
+      </Suspense>
       <style>{`
   /* Hide scrollbars for the entire page while this component is mounted */
   html, body {
@@ -213,7 +215,9 @@ export default function HomePage() {
           <div className="relative group">
             {/* Soft pulse behind the login box */}
             <div className="absolute -inset-1 bg-gradient-to-r from-[rgba(210,140,160,0.2)] to-transparent rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
-            <Login />
+            <Suspense fallback={null}>
+              <Login />
+            </Suspense>
           </div>
         </div>
       </main>
