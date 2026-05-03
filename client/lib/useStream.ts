@@ -65,12 +65,25 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
         const text = decoder.decode(value)
         const lines = text.split('\n')
         for (const line of lines) {
+
+
           if (!line.startsWith('data: ')) continue
           const token = line.slice(6)
           if (token === '[DONE]') break
-          fullResponse += token
+
+          if (token.startsWith('[SOURCES]')) {
+            try {
+              const sources = JSON.parse(token.slice(9))
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, sources } : m
+              ))
+            } catch { }
+            continue
+          }
+          const clean = token.replace(/\[Source:[^\]]+\]/g, '').replace(/\s{2,}/g, ' ')
+          fullResponse += clean
           setMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + token } : m
+            m.id === assistantId ? { ...m, content: m.content + clean } : m
           ))
         }
       }
@@ -89,5 +102,5 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
       setIsStreaming(false)
     }
   }, [userId, chatId, messages.length, title])
-  return { messages, isStreaming, send, loadHistory ,title}
+  return { messages, isStreaming, send, loadHistory, title }
 }
