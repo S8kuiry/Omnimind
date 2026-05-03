@@ -76,18 +76,34 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
 
               {/* Sources */}
               {msg.sources && msg.sources.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {msg.sources.map((s, i) => (
-                    <span
-                      key={i}
-                      className="text-[10px] px-2 py-0.5 rounded-full"
-                      style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)' }}
-                    >
-                      {s.source} · p{s.page}
-                    </span>
-                  ))}
-                </div>
-              )}
+  <div className="mt-1.5 flex flex-wrap gap-1.5">
+    {msg.sources.map((s, i) => (
+      <span
+        key={i}
+        className="text-[10px] px-2.5 py-1 rounded-full cursor-pointer transition-all duration-200"
+        style={{
+          background: 'rgba(210,140,160,0.08)',
+          color: 'rgba(255,255,255,0.35)',
+          border: '1px solid rgba(210,140,160,0.15)',
+        }}
+        onMouseEnter={e => {
+          const el = e.currentTarget
+          el.style.background = 'rgba(210,140,160,0.18)'
+          el.style.color = 'rgba(210,140,160,0.95)'
+          el.style.borderColor = 'rgba(210,140,160,0.5)'
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget
+          el.style.background = 'rgba(210,140,160,0.08)'
+          el.style.color = 'rgba(255,255,255,0.35)'
+          el.style.borderColor = 'rgba(210,140,160,0.15)'
+        }}
+      >
+        📄 {s.source} · p{s.page}
+      </span>
+    ))}
+  </div>
+)}
 
               {/* General knowledge hint */}
               {msg.mode === 'general' && (
