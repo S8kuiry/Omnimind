@@ -1,0 +1,51 @@
+import { NextResponse } from 'next/server'
+import dbConnect from '@/lib/mongo'
+import Chat from '@/models/Chat'
+import Message from '@/models/Message'
+
+export async function POST(req: Request) {
+    try {
+        const {
+            chatId,
+            userId,
+            role,
+            content,
+            title,
+            metadata = {}  // { sources, mode, model, latencyMs } for assistant
+                           // { attachments } for user
+        } = await req.json()
+
+        if (!chatId || !userId || !role || !content) {
+            return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+        }
+
+        await dbConnect()
+
+        // upsert chat — creates on first message, updates title/pdf info after
+        await Chat.findOneAndUpdate(
+            { chatId },
+            {
+                $set: {
+                    userId,
+                    ...(title && { title }),
+                    // if PDF was attached, store in chat metadata
+                    ...(metadata.pdfName && {
+                        'metadata.hasPdf': true,
+                        'metadata.pdfName': metadata.pdfName,
+                    }),
+                },
+                $setOnInsert: { chatId }
+            },
+            { upsert: true, new: true }
+        )
+
+        // save the message with its metadata
+        await Message.create({ chatId, userId, role, content, metadata })
+
+        return NextResponse.json({ success: true })
+
+    } catch (error) {
+        console.error('[save-message]', error)
+        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    }
+}

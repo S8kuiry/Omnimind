@@ -1,0 +1,93 @@
+import { useState, useCallback } from 'react'
+import { streamQuery } from './api'
+import { updateChatTitle } from './session'
+import autoNameChat from './autoNameChat'
+
+export interface Message {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources?: { source: string; page: number }[]
+  mode?: 'document' | 'general'
+}
+
+async function saveMessage(payload: object) {
+  await fetch('/api/chat/save-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function useStream(userId: string, chatId: string, initialMessages: Message[] = []) {
+  console.log('chat-id : ', chatId)
+  const [messages, setMessages] = useState<Message[]>(initialMessages) // 👈 accepts history
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [title, setTitle] = useState("")
+
+  // called from ChatPage when history loads — replaces empty state
+  const loadHistory = useCallback((history: Message[]) => {
+    setMessages(history)
+  }, [])
+
+  const send = useCallback(async (question: string) => {
+    const start = Date.now()
+
+    // immediate UI update
+    setIsStreaming(true)
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: question }
+    setMessages(prev => [...prev, userMsg])
+    const assistantId = crypto.randomUUID()
+    setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
+
+    // only name on first message
+    let chatTitle = title
+    if (messages.length === 0 && !title) {
+      const chunks = question.slice(0, 30) + (question.length > 30 ? '...' : '')
+      chatTitle = await autoNameChat(chatId, chunks)
+      setTitle(chatTitle)
+      window.dispatchEvent(new Event('omnimind_chats_updated'))
+    }
+
+    // save once
+    await saveMessage({ chatId, userId, role: 'user', content: question, title: chatTitle, metadata: {} })
+
+    let fullResponse = ''
+
+    try {
+      const response = await streamQuery(question, userId, chatId)
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value)
+        const lines = text.split('\n')
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const token = line.slice(6)
+          if (token === '[DONE]') break
+          fullResponse += token
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: m.content + token } : m
+          ))
+        }
+      }
+
+      await saveMessage({
+        chatId, userId, role: 'assistant', content: fullResponse,
+        metadata: { mode: 'general', model: 'llama-3.1-8b-instant', latencyMs: Date.now() - start }
+      })
+
+    } catch (err) {
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId
+          ? { ...m, content: 'Something went wrong. Please try again.' } : m
+      ))
+    } finally {
+      setIsStreaming(false)
+    }
+  }, [userId, chatId, messages.length, title])
+  return { messages, isStreaming, send, loadHistory ,title}
+}
