@@ -61,52 +61,58 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
       let buffer = ''
 
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
+     
 
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  const text = decoder.decode(value)
+  const lines = text.split('\n')
 
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue
+    const token = line.slice(6)
+    if (token === '[DONE]') break
 
-        for (const line of lines) {
+    // ✅ handle sources event
+    if (token.startsWith('[SOURCES]')) {
+      try {
+        const raw_sources = JSON.parse(token.slice(9))
+        const seen = new Set<string>()
+        const sources = raw_sources.filter((s: any) => {
+          const key = `${s.source}-${s.page}`
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? { ...m, sources } : m
+        ))
+      } catch {}
+      continue  // ✅ don't process as text
+    }
 
+    // ✅ buffer incomplete [Source:] tags
+    const raw = buffer + token
+    buffer = ''
 
-          if (!line.startsWith('data: ')) continue
-          const token = line.slice(6)
-          if (token === '[DONE]') break
+    if (raw.includes('[Source:') && !raw.includes(']')) {
+      buffer = raw
+      continue
+    }
 
-          if (token.startsWith('[SOURCES]')) {
-            try {
-              const sources = JSON.parse(token.slice(9))
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, sources } : m
-              ))
-            } catch { }
-            continue
-          }
-          const raw = buffer + token
-          buffer = ''
+    const clean = raw
+      .replace(/\[Source:[^\]]*\]/gi, '')
+      .replace(/\[SOURCES\].*$/g, '')
+      .replace(/\s{2,}/g, ' ')
 
-          // check if tag is incomplete (opened but not closed)
-          if (raw.includes('[Source:') && !raw.includes(']')) {
-            buffer = raw  // hold until next chunk completes it
-            continue
-          }
-
-         const clean = raw
-  .replace(/\[Source:[^\]]*\]/gi, '')   // ← add 'i' flag for case insensitive
-  .replace(/\[SOURCES\].*$/g, '')
-  .replace(/\s{2,}/g, ' ')
-
-  
-          if (!clean.trim()) continue
-          fullResponse += clean
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + clean } : m
-          ))
-        }
-      }
+    if (!clean.trim()) continue
+    fullResponse += clean
+    setMessages(prev => prev.map(m =>
+      m.id === assistantId ? { ...m, content: m.content + clean } : m
+    ))
+  }
+}
 
       await saveMessage({
         chatId, userId, role: 'assistant', content: fullResponse,
