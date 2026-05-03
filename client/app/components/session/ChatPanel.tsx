@@ -76,9 +76,9 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
 
               {/* Sources */}
               {msg.sources && msg.sources.length > 0 && (
-  <div className="mt-1.5 flex flex-wrap gap-1.5">
-    {msg.sources.map((s, i) => (
-      <span
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {msg.sources.map((s, i) => (
+                    <span
         key={i}
         className="text-[10px] px-2.5 py-1 rounded-full cursor-pointer transition-all duration-200"
         style={{
@@ -101,9 +101,9 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
       >
         📄 {s.source} · p{s.page}
       </span>
-    ))}
-  </div>
-)}
+                  ))}
+                </div>
+              )}
 
               {/* General knowledge hint */}
               {msg.mode === 'general' && (

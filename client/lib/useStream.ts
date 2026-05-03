@@ -65,7 +65,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
         const text = decoder.decode(value)
         const lines = text.split('\n')
 
-
+        
         for (const line of lines) {
 
 
@@ -82,15 +82,13 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
             } catch { }
             continue
           }
-          const clean = token
-            .replace(/\[Source:[^\]]*\]/g, '')
-            .replace(/\[SOURCES\].*$/g, '')        // ← no 's' flag, cuts from [SOURCES] to end of line
-            .replace(/\s{2,}/g, ' ')
-            .trim()
+const clean = token
+  .replace(/\[Source:[^\]]*\]/g, '')
+  .replace(/\[SOURCES\].*$/g, '')
+  .replace(/\s{2,}/g, ' ')
+  // ❌ remove .trim()
 
-          if (!clean) continue
-
-          fullResponse += clean
+if (!clean.trim()) continue  // still skip truly empty tokens          fullResponse += clean
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: m.content + clean } : m
           ))
