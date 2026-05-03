@@ -79,28 +79,28 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {msg.sources.map((s, i) => (
                     <span
-        key={i}
-        className="text-[10px] px-2.5 py-1 rounded-full cursor-pointer transition-all duration-200"
-        style={{
-          background: 'rgba(210,140,160,0.08)',
-          color: 'rgba(255,255,255,0.35)',
-          border: '1px solid rgba(210,140,160,0.15)',
-        }}
-        onMouseEnter={e => {
-          const el = e.currentTarget
-          el.style.background = 'rgba(210,140,160,0.18)'
-          el.style.color = 'rgba(210,140,160,0.95)'
-          el.style.borderColor = 'rgba(210,140,160,0.5)'
-        }}
-        onMouseLeave={e => {
-          const el = e.currentTarget
-          el.style.background = 'rgba(210,140,160,0.08)'
-          el.style.color = 'rgba(255,255,255,0.35)'
-          el.style.borderColor = 'rgba(210,140,160,0.15)'
-        }}
-      >
-        📄 {s.source} · p{s.page}
-      </span>
+                      key={i}
+                      className="text-[10px] px-2.5 py-1 rounded-full cursor-pointer transition-all duration-200"
+                      style={{
+                        background: 'rgba(210,140,160,0.08)',
+                        color: 'rgba(255,255,255,0.35)',
+                        border: '1px solid rgba(210,140,160,0.15)',
+                      }}
+                      onMouseEnter={e => {
+                        const el = e.currentTarget
+                        el.style.background = 'rgba(210,140,160,0.18)'
+                        el.style.color = 'rgba(210,140,160,0.95)'
+                        el.style.borderColor = 'rgba(210,140,160,0.5)'
+                      }}
+                      onMouseLeave={e => {
+                        const el = e.currentTarget
+                        el.style.background = 'rgba(210,140,160,0.08)'
+                        el.style.color = 'rgba(255,255,255,0.35)'
+                        el.style.borderColor = 'rgba(210,140,160,0.15)'
+                      }}
+                    >
+                      📄 {s.source} · p{s.page}
+                    </span>
                   ))}
                 </div>
               )}
@@ -137,53 +137,53 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
             </button>
           </div>
         )} */}
-        
+
 
 
         <div className="flex flex-col items-start justify-start relative bottom-6 inset-x-0 gap-2 rounded-2xl px-4 py-3"
           style={{ background: 'rgba(31, 29, 29, 0.95)', border: '1px solid rgba(61, 58, 58, 0.09)' }}>
 
-{hasDocs.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <div
+          {hasDocs.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <div
 
-              className="group  flex flex-row items-center gap-1.5 mb-1.5 px-1 w-fit"
-            >
+                className="group  flex flex-row items-center gap-1.5 mb-1.5 px-1 w-fit"
+              >
 
-              <p className="gap-1.5 mb-1.5 px-1 w-fit text-[10px]" style={{ color: 'rgba(210,140,160,0.5)' }}>
-                {hasDocs.length > 0 ? "Searching in:" : ""}
-              </p>
-              {hasDocs.map((name) => (
+                <p className="gap-1.5 mb-1.5 px-1 w-fit text-[10px]" style={{ color: 'rgba(210,140,160,0.5)' }}>
+                  {hasDocs.length > 0 ? "Searching in:" : ""}
+                </p>
+                {hasDocs.map((name) => (
 
 
-                <div
-                  key={name}
+                  <div
+                    key={name}
 
-                  className="group  flex flex-row items-center gap-1.5 mb-1.5 px-2 py-1 w-fit bg-[#000000] rounded-full"
-                >
-                  <p className="text-[10px]" style={{ color: 'rgba(245, 241, 242, 0.5)' }}>
-                    {name}
-                  </p>
-                  <button
-                    onClick={() => onRemove(name)}
-                    className="cursor-pointer  group-hover:opacity-100 transition-opacity hover:text-red-400"
-                    style={{ color: 'rgba(210,140,160,0.5)' }}
-                    title="Remove document"
+                    className="group  flex flex-row items-center gap-1.5 mb-1.5 px-2 py-1 w-fit bg-[#000000] rounded-full"
                   >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="white" stroke="currentColor" strokeWidth="2.5">
-                      <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                </div>
+                    <p className="text-[10px]" style={{ color: 'rgba(245, 241, 242, 0.5)' }}>
+                      {name}
+                    </p>
+                    <button
+                      onClick={() => onRemove(name)}
+                      className="cursor-pointer  group-hover:opacity-100 transition-opacity hover:text-red-400"
+                      style={{ color: 'rgba(210,140,160,0.5)' }}
+                      title="Remove document"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="white" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
 
 
 
-              ))}
+                ))}
+              </div>
+
+
             </div>
-
-
-          </div>
-        )}
+          )}
 
 
 

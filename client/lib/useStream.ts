@@ -58,6 +58,8 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
       const response = await streamQuery(question, userId, chatId)
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
+      let buffer = ''
+
 
       while (true) {
         const { done, value } = await reader.read()
@@ -65,7 +67,8 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
         const text = decoder.decode(value)
         const lines = text.split('\n')
 
-        
+
+
         for (const line of lines) {
 
 
@@ -82,13 +85,22 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
             } catch { }
             continue
           }
-const clean = token
-  .replace(/\[Source:[^\]]*\]/g, '')
-  .replace(/\[SOURCES\].*$/g, '')
-  .replace(/\s{2,}/g, ' ')
-  // ❌ remove .trim()
+          const raw = buffer + token
+          buffer = ''
 
-if (!clean.trim()) continue  // still skip truly empty tokens          fullResponse += clean
+          // check if tag is incomplete (opened but not closed)
+          if (raw.includes('[Source:') && !raw.includes(']')) {
+            buffer = raw  // hold until next chunk completes it
+            continue
+          }
+
+          const clean = raw
+            .replace(/\[Source:[^\]]*\]/g, '')
+            .replace(/\[SOURCES\].*$/g, '')
+            .replace(/\s{2,}/g, ' ')
+
+          if (!clean.trim()) continue
+          fullResponse += clean
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: m.content + clean } : m
           ))
