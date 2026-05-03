@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Form, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,38 +104,49 @@ async def upload_pdf(
     }
 
 
-# ── Query ──────────────────────────────────────────────────────────
 
-# @app.post("/query")
-# async def query(request: QueryRequest):
-#     """Full response Q&A, scoped to user."""
+# @app.post("/stream")
+# async def stream(request: QueryRequest):
+#     """Streaming Q&A via Server-Sent Events, scoped to user."""
 #     query_vec = embed_query(request.question)
-    
-#     # use chat_id as scope if provided, else user_id
 #     scope = request.chat_id or request.user_id
 #     chunks = query_chunks(query_vec, user_id=scope, top_k=TOP_K_RESULTS)
 
-#     # no PDF? answer from Groq general knowledge
-#     if not chunks:
-#         answer = get_answer_no_context(request.question)
-#         return {"answer": answer, "sources": [], "mode": "general"}
+#     def event_generator():
+#         for token in stream_answer(request.question, chunks):  # chunks can be []
+#             yield f"data: {token}\n\n"
+#         yield "data: [DONE]\n\n"
 
-
-#     answer = get_answer(request.question, chunks)
-#     return {"answer": answer, "sources": [{"source": c["source"], "page": c["page"]} for c in chunks], "mode": "document"}
-
+#     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/stream")
 async def stream(request: QueryRequest):
-    """Streaming Q&A via Server-Sent Events, scoped to user."""
     query_vec = embed_query(request.question)
     scope = request.chat_id or request.user_id
     chunks = query_chunks(query_vec, user_id=scope, top_k=TOP_K_RESULTS)
 
     def event_generator():
-        for token in stream_answer(request.question, chunks):  # chunks can be []
+        full_response = ""
+        for token in stream_answer(request.question, chunks):
+            full_response += token
             yield f"data: {token}\n\n"
+        
+        # after streaming done — extract and send sources separately
+        pattern = r'\[Source:\s*([^,\]]+),\s*Page\s*(\d+)\]'
+        matches = re.findall(pattern, full_response)
+        seen = set()
+        sources = []
+        for source, page in matches:
+            key = f"{source}-{page}"
+            if key not in seen:
+                seen.add(key)
+                sources.append({"source": source.strip(), "page": int(page)})
+        
+        if sources:
+            import json
+            yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
+        
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
