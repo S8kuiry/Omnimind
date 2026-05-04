@@ -3,13 +3,12 @@ import { useRef, useEffect, useState } from 'react'
 import type { Message } from '@/lib/useStream'
 import FormattedMessage from '../FormattedMessage'
 
-export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading, hasDocs, docName, onRemove }: {
+export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading, hasDocs, onRemove }: {
   messages: Message[]
   isStreaming: boolean
   onSend: (q: string) => void
   onUpload: (f: File) => void
   uploading: boolean
-  docName: string | null
   hasDocs: string[]
   onRemove: (name: string) => void
 }) {

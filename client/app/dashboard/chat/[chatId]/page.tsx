@@ -62,13 +62,13 @@ export default function ChatPage() {
           })))
         }
         // restore PDF state if chat had a PDF
-        if (data.chat?.metadata?.pdfName) {
-          setDocName(data.chat.metadata.pdfName)
+        // if (data.chat?.metadata?.pdfName) {
+        //   setDocName(data.chat.metadata.pdfName)
 
-        }
-        if (data.chat?.metadata?.pdfNames) {
-          setDocNames(data.chat.metadata.pdfNames)
-        }
+        // }
+        // if (data.chat?.metadata?.pdfNames) {
+        //   setDocNames(data.chat.metadata.pdfNames)
+        // }
         setHistoryLoaded(true)
       })
       .catch(() => setHistoryLoaded(true))
@@ -93,6 +93,18 @@ export default function ChatPage() {
     }
   }
 
+  useEffect(() => {
+  if (!chatId || !historyLoaded) return
+
+  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.documents?.length > 0) {
+        setDocNames(data.documents)
+      }
+    })
+}, [chatId, historyLoaded])
+
   // don't render until session is ready
   if (!userId) return (
     <div className="flex-1 flex items-center justify-center h-screen" style={{ background: '#0e0f10' }}>
@@ -116,7 +128,6 @@ export default function ChatPage() {
             onUpload={handleUpload}
             uploading={uploading}
             hasDocs={docNames}
-            docName={docName}
             onRemove={handleRemove}
           />
         )}

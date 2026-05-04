@@ -226,10 +226,28 @@ def delete_doc(doc_name: str, user_id: str, chat_id: str = ""):
 
 
 
-@app.get("/debug/chunks")
-async def debug_chunks(chat_id: str):
+# fetching pdfs from pinecone
+@app.get("/documents/chat/{chat_id}")
+def get_chat_documents(chat_id:str):
+    """Returns all doc names uploaded in this chat's namespace."""
     from services.vector_store import _get_index
     index = _get_index()
-    stats = index.describe_index_stats()
-    namespaces = {k: v.vector_count for k, v in stats.namespaces.items()}
-    return {"namespaces": namespaces}
+    
+    all_ids = []
+    for id_batch in index.list(namespace=chat_id):
+        all_ids.extend(id_batch)
+    
+    if not all_ids:
+        return {"documents": []}
+    
+    # extract doc name from ID format: {chat_id}_{doc_name}_{chunk_id}
+    doc_names = set()
+    for vid in all_ids:
+        parts = vid.split('_')
+        if len(parts) >= 3:
+            # remove first (chat_id) and last (chunk_id) parts
+            doc_name = '_'.join(parts[1:-1])
+            doc_names.add(doc_name)
+    
+    return {"documents": list(doc_names)}
+
