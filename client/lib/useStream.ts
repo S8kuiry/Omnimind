@@ -32,6 +32,14 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
 
   const send = useCallback(async (question: string) => {
     const start = Date.now()
+    // ✅ capture history BEFORE adding empty assistant message
+    const history = messages
+      .slice(-15)
+      .map(m => ({ role: m.role, content: m.content }))
+      .filter(m => m.content.trim() !== '')  // ✅ filter empty messages
+    console.log('history being sent:', history)  // ✅ add this
+
+
 
     // immediate UI update
     setIsStreaming(true)
@@ -55,64 +63,66 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     let fullResponse = ''
 
     try {
-      const response = await streamQuery(question, userId, chatId)
+
+
+      const response = await streamQuery(question, userId, chatId, history)
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
 
-     
 
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-  const text = decoder.decode(value)
-  const lines = text.split('\n')
 
-  for (const line of lines) {
-    if (!line.startsWith('data: ')) continue
-    const token = line.slice(6)
-    if (token === '[DONE]') break
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value)
+        const lines = text.split('\n')
 
-    // ✅ handle sources event
-    if (token.startsWith('[SOURCES]')) {
-      try {
-        const raw_sources = JSON.parse(token.slice(9))
-        const seen = new Set<string>()
-        const sources = raw_sources.filter((s: any) => {
-          const key = `${s.source}-${s.page}`
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId ? { ...m, sources } : m
-        ))
-      } catch {}
-      continue  // ✅ don't process as text
-    }
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const token = line.slice(6)
+          if (token === '[DONE]') break
 
-    // ✅ buffer incomplete [Source:] tags
-    const raw = buffer + token
-    buffer = ''
+          // ✅ handle sources event
+          if (token.startsWith('[SOURCES]')) {
+            try {
+              const raw_sources = JSON.parse(token.slice(9))
+              const seen = new Set<string>()
+              const sources = raw_sources.filter((s: any) => {
+                const key = `${s.source}-${s.page}`
+                if (seen.has(key)) return false
+                seen.add(key)
+                return true
+              })
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, sources } : m
+              ))
+            } catch { }
+            continue  // ✅ don't process as text
+          }
 
-    if (raw.includes('[Source:') && !raw.includes(']')) {
-      buffer = raw
-      continue
-    }
+          // ✅ buffer incomplete [Source:] tags
+          const raw = buffer + token
+          buffer = ''
 
-    const clean = raw
-      .replace(/\[Source:[^\]]*\]/gi, '')
-      .replace(/\[SOURCES\].*$/g, '')
-      .replace(/\s{2,}/g, ' ')
+          if (raw.includes('[Source:') && !raw.includes(']')) {
+            buffer = raw
+            continue
+          }
 
-    if (!clean.trim()) continue
-    fullResponse += clean
-    setMessages(prev => prev.map(m =>
-      m.id === assistantId ? { ...m, content: m.content + clean } : m
-    ))
-  }
-}
+          const clean = raw
+            .replace(/\[Source:[^\]]*\]/gi, '')
+            .replace(/\[SOURCES\].*$/g, '')
+            .replace(/\s{2,}/g, ' ')
+
+          if (!clean.trim()) continue
+          fullResponse += clean
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: m.content + clean } : m
+          ))
+        }
+      }
 
       await saveMessage({
         chatId, userId, role: 'assistant', content: fullResponse,

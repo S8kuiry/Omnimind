@@ -203,14 +203,14 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
 
           {/* Mini Dropdown Menu */}
           {isMenuOpen && (
-            <div className="absolute right-0 mt-1 w-24 bg-[#1a1a1a] border border-white/10 rounded-md shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 mt-1 w-24 bg-[#1a1a1a] border border-white/20 rounded-md shadow-xl z-50 overflow-hidden">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setChatToDelete(chat.chatId); // Open confirmation modal
                   setMenuOpenId(null);
                 }}
-                className="w-full text-left px-3 py-2 text-[10px] text-red-400 hover:bg-white/5 transition-colors"
+                className="cursor-pointer w-full flex items-center justify-center text-left px-3 py-2 text-[10px] text-red-400 hover:bg-gray-900/60 transition-colors"
               >
                 Delete Chat
               </button>

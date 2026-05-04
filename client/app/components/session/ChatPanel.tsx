@@ -2,14 +2,17 @@
 import { useRef, useEffect, useState } from 'react'
 import type { Message } from '@/lib/useStream'
 import FormattedMessage from '../FormattedMessage'
+import { Check, Copy } from 'lucide-react'
 
-export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading, hasDocs, onRemove }: {
+export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading,onFeature, hasDocs, onRemove }: {
   messages: Message[]
   isStreaming: boolean
   onSend: (q: string) => void
   onUpload: (f: File) => void
   uploading: boolean
   hasDocs: string[]
+  onFeature: (type: 'guidance' | 'analytics' | 'compare') => void
+
   onRemove: (name: string) => void
 }) {
   const [input, setInput] = useState('')
@@ -25,6 +28,41 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
     onSend(input.trim())
     setInput('')
   }
+
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getButtonColor = () => {
+    if (copied || isHovered) return 'rgba(210,140,160,0.9)';
+    return 'rgba(255,255,255,0.3)';
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      // Added p-1.5 to keep the click area comfortable
+      className="absolute -top-2 -left-13 cursor-pointer flex items-center justify-center p-1.5 rounded-md transition-all duration-200 hover:bg-white/5"
+      style={{
+        color: getButtonColor(),
+      }}
+      title={copied ? "Copied!" : "Copy to clipboard"}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+
 
   return (
     <div className="flex flex-col h-full pt-10 pb-2 relative">
@@ -52,7 +90,7 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className="max-w-[75%]">
               <div
-                className="text-sm leading-relaxed rounded-2xl px-4 py-3"
+                className="text-sm leading-relaxed rounded-xl px-4 py-3"
                 style={{
                   background: msg.role === 'user' ? 'rgba(210,140,160,0.15)' : 'rgba(255,255,255,0.05)',
                   color: 'rgba(255,255,255,0.87)',
@@ -63,7 +101,13 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
               >
                 {msg.role === 'user' ? (
                   // ── User bubble: plain text, no markdown ──
-                  <span className="whitespace-pre-wrap">{msg.content}</span>
+
+                  <div className="flex relative items-start gap-2">
+                    <CopyButton text={msg.content} />
+                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                  </div>
+                  
+                  
                 ) : (
                   // ── Assistant bubble: formatted markdown ──
                   <FormattedMessage
@@ -139,14 +183,14 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
 
 
 
-        <div className="flex flex-col items-start justify-start relative bottom-6 inset-x-0 gap-2 rounded-2xl px-4 py-3"
+        <div className="flex flex-col items-start justify-start relative bottom-2 inset-x-0 gap-2 rounded-2xl px-4 py-3"
           style={{ background: 'rgba(31, 29, 29, 0.95)', border: '1px solid rgba(61, 58, 58, 0.09)' }}>
 
           {hasDocs.length > 0 && (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 ">
               <div
 
-                className="group  flex flex-row items-center gap-1.5 mb-1.5 px-1 w-fit"
+                className="group  flex flex-wrap items-center gap-1.5 mb-1.5 px-1 w-fit"
               >
 
                 <p className="gap-1.5 mb-1.5 px-1 w-fit text-[10px]" style={{ color: 'rgba(210,140,160,0.5)' }}>
@@ -184,6 +228,47 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
             </div>
           )}
 
+{/*comparision */}
+          {hasDocs.length > 0 && (
+            <div className="flex flex-wrap gap-2 w-full">
+              {[
+                { label: 'Guidance', icon: '🧭' },
+                { label: 'Analytics', icon: '📊' },
+                { label: 'Compare', icon: '⚖️', disabled: hasDocs.length < 2 },
+              ].map(({ label, icon, disabled }) => (
+                <button
+                  key={label}
+                  disabled={disabled}
+                  onClick={() => onFeature(label.toLowerCase() as 'guidance' | 'analytics' | 'compare')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] transition-all"
+                  style={{
+                    background: disabled ? 'rgba(255,255,255,0.03)' : 'rgba(210,140,160,0.08)',
+                    border: `1px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(210,140,160,0.2)'}`,
+                    color: disabled ? 'rgba(255,255,255,0.2)' : 'rgba(210,140,160,0.8)',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                  }}
+                  onMouseEnter={e => {
+                    if (!disabled) {
+                      e.currentTarget.style.background = 'rgba(210,140,160,0.15)'
+                      e.currentTarget.style.borderColor = 'rgba(210,140,160,0.4)'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!disabled) {
+                      e.currentTarget.style.background = 'rgba(210,140,160,0.08)'
+                      e.currentTarget.style.borderColor = 'rgba(210,140,160,0.2)'
+                    }
+                  }}
+                >
+                  <span>{icon}</span>
+                  {label}
+                  {label === 'Compare' && hasDocs.length < 2 && (
+                    <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: '9px' }}>(need 2 docs)</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
 
           <div className="flex w-full items-center  gap-2">
@@ -192,7 +277,7 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
             <input ref={fileRef} type="file" accept=".pdf" className="hidden"
               onChange={e => e.target.files?.[0] && onUpload(e.target.files[0])} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
-              className="flex-shrink-0 p-1.5 rounded-lg transition-all"
+              className="cursor-pointer flex-shrink-0 p-1.5 rounded-lg transition-all"
               style={{ color: uploading ? 'rgba(210,140,160,0.4)' : 'rgba(210,140,160,0.7)' }}
               title="Attach PDF">
               {uploading

@@ -93,8 +93,10 @@ export default function ChatPage() {
     }
   }
 
+
+{/*fecthing doc names  */}
   useEffect(() => {
-  if (!chatId || !historyLoaded) return
+  if (!chatId) return  // ✅ remove historyLoaded dependency
 
   fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
     .then(r => r.json())
@@ -103,7 +105,15 @@ export default function ChatPage() {
         setDocNames(data.documents)
       }
     })
-}, [chatId, historyLoaded])
+}, [chatId])  // ✅ only depends on chatId
+
+
+{/** feature handle  */}
+const handleFeature = (type: 'guidance' | 'analytics' | 'compare') => {
+  setActiveTab(type)
+}
+
+
 
   // don't render until session is ready
   if (!userId) return (
@@ -119,7 +129,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col h-screen" style={{ background: '#0e0f10' }}>
-      <div className="flex-1 overflow-hidden px-30">
+      <div className="flex-1 overflow-hidden px-40">
         {activeTab === 'chat' && (
           <ChatPanel
             messages={messages}
@@ -129,6 +139,8 @@ export default function ChatPage() {
             uploading={uploading}
             hasDocs={docNames}
             onRemove={handleRemove}
+            onFeature={handleFeature}
+
           />
         )}
       </div>

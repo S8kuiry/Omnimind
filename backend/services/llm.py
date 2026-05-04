@@ -6,10 +6,9 @@ client = Groq(api_key=GROQ_API_KEY)
 # ── Prompt builders ────────────────────────────────────────────────
 
 def _build_context(chunks: list[dict]) -> str:
-    """Formats retrieved chunks into a labelled context block."""
     parts = [
         f"--- DOCUMENT SEGMENT ---\n"
-        f"[Source: {c['source']}, Page: {c['page']}]\n"
+        f"[Document: {c['source']}, Page: {c['page']}]\n"
         f"Content: {c['text']}"
         for c in chunks
     ]
@@ -25,7 +24,7 @@ def _prompt_qa(question: str, chunks: list[dict]) -> str:
     return f"""You are a High-Performance AI Document Analyst. Your goal is to provide accurate, cited, and context-aware responses.
 
 ### MANDATORY PROTOCOLS:
-1. **Source Awareness:** Identify if the context contains one document or multiple. 
+1. **Source Awareness:** Multiple segments from the SAME filename are parts of ONE document — do NOT treat them as separate documents.
 2. **Task Adaptation:**
    - Specific fact → direct answer with citation.
    - Comparison asked → contrast the documents involved.
@@ -183,36 +182,56 @@ def get_analytics(chunks: list[dict]) -> str:
     return response.choices[0].message.content
 
 
-def stream_answer(question: str, chunks: list[dict]):
-    """
-    Streaming version of get_answer — yields tokens as they arrive.
-    Used by /stream endpoint. Next.js reads this as Server-Sent Events.
-    """
-    # if no chunks — stream general knowledge answer
+# def stream_answer(question: str, chunks: list[dict]):
+#     """
+#     Streaming version of get_answer — yields tokens as they arrive.
+#     Used by /stream endpoint. Next.js reads this as Server-Sent Events.
+#     """
+#     # if no chunks — stream general knowledge answer
+#     if chunks:
+#         prompt = _prompt_qa(question, chunks)
+#     else:
+#         prompt = question  # raw question to Groq
+
+#     stream = client.chat.completions.create(
+#         model=GROQ_MODEL,
+#         messages=[{"role": "user", "content": prompt}],
+#         temperature=0.1 if chunks else 0.7,
+#         max_tokens=2048 ,
+#         stream=True
+#     )
+#     for chunk in stream:
+#         token = chunk.choices[0].delta.content
+#         if token:
+#             yield token
+
+def stream_answer(question: str, chunks: list[dict], history: list[dict] = []):
     if chunks:
         prompt = _prompt_qa(question, chunks)
     else:
-        prompt = question  # raw question to Groq
+        prompt = question
+
+    # build messages with history
+    messages = []
+    
+    # add previous turns
+    for msg in history[-6:]:  # last 6 messages = 3 exchanges
+        messages.append({
+            "role": msg["role"],
+            "content": msg["content"]
+        })
+    
+    # add current question with context
+    messages.append({"role": "user", "content": prompt})
 
     stream = client.chat.completions.create(
         model=GROQ_MODEL,
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0.1 if chunks else 0.7,
-        max_tokens=1024,
+        max_tokens=2048,
         stream=True
     )
     for chunk in stream:
         token = chunk.choices[0].delta.content
         if token:
             yield token
-
-
-# def get_answer_no_context(question: str) -> str:
-#     """Answers from Groq general knowledge when no PDF is uploaded."""
-#     response = client.chat.completions.create(
-#         model=GROQ_MODEL,
-#         messages=[{"role": "user", "content": question}],
-#         temperature=0.7,
-#         max_tokens=1024
-#     )
-#     return response.choices[0].message.content

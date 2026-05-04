@@ -81,7 +81,7 @@ def store_chunks(
 def query_chunks(
     query_embedding: list[float],
     user_id: str,
-    top_k: int = 4,
+    top_k: int = 8,
     source_filter: str = None
 ) -> list[dict]:
     """

@@ -49,8 +49,9 @@ class QueryRequest(BaseModel):
     question: str
     user_id: str
     chat_id: str | None = None   # which chat session
-
     source_type: str = "pdf"
+    history: list[dict] = []  # ✅ add this
+
 
 class CompareRequest(BaseModel):
     question: str
@@ -105,35 +106,28 @@ async def upload_pdf(
 
 
 
-# @app.post("/stream")
-# async def stream(request: QueryRequest):
-#     """Streaming Q&A via Server-Sent Events, scoped to user."""
-#     query_vec = embed_query(request.question)
-#     scope = request.chat_id or request.user_id
-#     chunks = query_chunks(query_vec, user_id=scope, top_k=TOP_K_RESULTS)
-
-#     def event_generator():
-#         for token in stream_answer(request.question, chunks):  # chunks can be []
-#             yield f"data: {token}\n\n"
-#         yield "data: [DONE]\n\n"
-
-#     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.post("/stream")
 async def stream(request: QueryRequest):
+    print("history received:", request.history)  # 👈 add this
+
     query_vec = embed_query(request.question)
     scope = request.chat_id or request.user_id
-    chunks = query_chunks(query_vec, user_id=scope, top_k=TOP_K_RESULTS)
+    chunks = query_chunks(query_vec, user_id=scope, top_k=8)
 
     def event_generator():
         full_response = ""
-        for token in stream_answer(request.question, chunks):
+        for token in stream_answer(
+            request.question,
+            chunks,
+            history=request.history or []
+        ):
             full_response += token
             yield f"data: {token}\n\n"
-        
-        # after streaming done — extract and send sources separately
-        pattern = r'\[Source:\s*([^,\]]+),\s*Page\s*(\d+)\]'
+
+        # ✅ these must be INSIDE event_generator
+        pattern = r'\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]'
         matches = re.findall(pattern, full_response)
         seen = set()
         sources = []
@@ -142,11 +136,10 @@ async def stream(request: QueryRequest):
             if key not in seen:
                 seen.add(key)
                 sources.append({"source": source.strip(), "page": int(page)})
-        
+
         if sources:
-            import json
             yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
-        
+
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -243,10 +236,9 @@ def get_chat_documents(chat_id:str):
     # extract doc name from ID format: {chat_id}_{doc_name}_{chunk_id}
     doc_names = set()
     for vid in all_ids:
-        parts = vid.split('_')
-        if len(parts) >= 3:
-            # remove first (chat_id) and last (chunk_id) parts
-            doc_name = '_'.join(parts[1:-1])
+        without_chat_id = '_'.join(vid.split('_')[1:])  # remove chat_id prefix
+        doc_name = re.sub(r'_page\d+_chunk\d+$', '', without_chat_id)  # remove _pageN_chunkN
+        if doc_name:
             doc_names.add(doc_name)
     
     return {"documents": list(doc_names)}

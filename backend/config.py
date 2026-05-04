@@ -24,4 +24,4 @@ GROQ_MODEL         = "llama-3.1-8b-instant"
 
 CHUNK_SIZE         = 500
 CHUNK_OVERLAP      = 50
-TOP_K_RESULTS      = 4
+TOP_K_RESULTS      = 8
