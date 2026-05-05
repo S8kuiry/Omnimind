@@ -39,8 +39,6 @@ export default function Header() {
             {/* Left — breadcrumb / page title */}
             <div className="flex items-center gap-2">
                 <span className="text-xs text-white/25 tracking-widest uppercase">OmniMind</span>
-                <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
-                <span className="text-xs text-white/60 tracking-wide">{chatTitle === "" ? "Chat Not Found" : chatTitle}</span>
                 {chatTitle && (
                     <>
                         <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
