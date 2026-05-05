@@ -138,7 +138,9 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
           const clean = raw
             .replace(/\[Source:[^\]]*\]/gi, '')
             .replace(/\[SOURCES\].*$/g, '')
-            .replace(/\s{2,}/g, ' ')
+            // ✅ only collapse runs of spaces/tabs — never newlines.
+            // Collapsing \n killed code blocks (everything became one line).
+            .replace(/[ \t]{2,}/g, ' ')
 
           if (!clean.trim()) continue
           fullResponse += clean

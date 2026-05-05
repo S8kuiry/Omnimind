@@ -45,9 +45,22 @@ function normalizeMarkdown(raw: string): string {
   s = s.replace(/^(\s*)-(?=[A-Za-z])/gm, '$1- ')
 
   // ── Code fence safety ──────────────────────────────────────────────
-  // Ensure ``` starts on its own line and ends on its own line
+  // Closing fences often get glued to the next list item: "```2." or
+  // "```- next" — break those before anything else so the rest of the
+  // pipeline doesn't mistake "```2" for an opening fence with language "2".
+  s = s.replace(/```(?=\d+[.)])/g, '```\n')
+  s = s.replace(/```(?=\s*[-*]\s)/g, '```\n')
+
+  // Ensure ``` starts on its own line
   s = s.replace(/([^\n])(```)/g, '$1\n$2')
-  s = s.replace(/(```\w*)([^\n])/g, '$1\n$2')
+
+  // Ensure language tag is followed by a newline before the code body.
+  // Only treat the suffix as a language when it's a real word (letters),
+  // not digits — digits are always misglued list numbers.
+  s = s.replace(/```([A-Za-z][A-Za-z0-9+#-]*)([^\n])/g, '```$1\n$2')
+
+  // Bare closing fence (``` followed by non-newline, non-letter) → newline
+  s = s.replace(/```(?=[^\n A-Za-z`])/g, '```\n')
 
   // ── Section / paragraph breathing room ─────────────────────────────
   // Bold inline label following a sentence → push it to its own block

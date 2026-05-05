@@ -1,13 +1,36 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { signOut, useSession } from 'next-auth/react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 
 
 export default function Header() {
     const { data: session } = useSession()
+    const page = usePathname().split('/')
+    const chatId = page[3]
     const [menuOpen, setMenuOpen] = useState(false)
+    const [chatTitle, setChatTitle] = useState('')
+
+    useEffect(() => {
+        if (!chatId || !session?.user?.id) {
+            setChatTitle('')
+            return
+        }
+
+        const getChatName = async () => {
+            try {
+                const response = await fetch(`/api/chat/name/${chatId}?userId=${session.user.id}`)
+                const data = await response.json()
+                setChatTitle(data.title ?? '')
+            } catch {
+                setChatTitle('')
+            }
+        }
+
+        getChatName()
+    }, [chatId, session?.user?.id])
 
     return (
         <header className="flex items-center justify-between px-6 py-2"
@@ -17,43 +40,21 @@ export default function Header() {
             <div className="flex items-center gap-2">
                 <span className="text-xs text-white/25 tracking-widest uppercase">OmniMind</span>
                 <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
-                <span className="text-xs text-white/60 tracking-wide">Dashboard</span>
+                <span className="text-xs text-white/60 tracking-wide">{chatTitle === "" ? "Chat Not Found" : chatTitle}</span>
+                {chatTitle && (
+                    <>
+                        <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
+                        <span className="text-xs text-white/50 tracking-wide max-w-[220px] truncate">{chatTitle}</span>
+                    </>
+                )}
             </div>
 
-            {/* Center — search */}
-            {/* <div className="flex-1 max-w-sm mx-8">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-                        style={{ color: 'rgba(255,255,255,0.25)', flexShrink: 0 }}>
-                        <circle cx="11" cy="11" r="8" />
-                        <path d="m21 21-4.35-4.35" strokeLinecap="round" />
-                    </svg>
-                    <input
-                        type="text"
-                        placeholder="Search anything..."
-                        className="flex-1 bg-transparent outline-none text-xs text-white/60 placeholder:text-white/20"
-                    />
-                    <kbd className="text-[10px] px-1.5 py-0.5 rounded"
-                        style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                        ⌘K
-                    </kbd>
-                </div>
-            </div> */}
+          
 
             {/* Right — actions + user */}
             <div className="flex items-center gap-2">
 
-                {/* Notification bell */}
-                {/* <button className="relative w-8 h-8 flex items-center justify-center rounded-lg transition-all"
-                    style={{ color: 'rgba(255,255,255,0.35)' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" strokeLinecap="round" />
-                    </svg>
-                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full"
-                        style={{ background: 'rgba(210,140,160,0.9)' }} />
-                </button> */}
-
+              
                 {/* Divider */}
                 <div className="w-px h-4 mx-1" style={{ background: 'rgba(255,255,255,0.08)' }} />
 
