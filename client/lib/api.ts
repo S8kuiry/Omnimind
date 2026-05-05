@@ -34,14 +34,14 @@ export async function deleteDocument(docName: string, userId: string, chatId: st
 }
 
 
-export async function getGuidance(docName: string, userId: string) {
-  const res = await fetch(`${API}/guidance/${docName}?user_id=${userId}`)
+export async function getGuidance(docName: string, userId: string, chatId: string) {
+  const res = await fetch(`${API}/guidance/${docName}?user_id=${userId}&chat_id=${chatId}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-export async function getAnalytics(docName: string, userId: string) {
-  const res = await fetch(`${API}/analytics/${docName}?user_id=${userId}`)
+export async function getAnalytics(docName: string, userId: string, chatId: string) {
+  const res = await fetch(`${API}/analytics/${docName}?user_id=${userId}&chat_id=${chatId}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

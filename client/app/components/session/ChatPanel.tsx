@@ -4,7 +4,7 @@ import type { Message } from '@/lib/useStream'
 import FormattedMessage from '../FormattedMessage'
 import { Check, Copy } from 'lucide-react'
 
-export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading,onFeature, hasDocs, onRemove }: {
+export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading, onFeature, hasDocs, onRemove }: {
   messages: Message[]
   isStreaming: boolean
   onSend: (q: string) => void
@@ -30,44 +30,44 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
   }
 
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
+  function CopyButton({ text }: { text: string }) {
+    const [copied, setCopied] = useState(false);
+    const [isHovered, setIsHovered] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+    const handleCopy = () => {
+      navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
 
-  const getButtonColor = () => {
-    if (copied || isHovered) return 'rgba(210,140,160,0.9)';
-    return 'rgba(255,255,255,0.3)';
-  };
+    const getButtonColor = () => {
+      if (copied || isHovered) return 'rgba(210,140,160,0.9)';
+      return 'rgba(255,255,255,0.3)';
+    };
 
-  return (
-    <button
-      onClick={handleCopy}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      // Added p-1.5 to keep the click area comfortable
-      className="absolute -top-2 -left-13 cursor-pointer flex items-center justify-center p-1.5 rounded-md transition-all duration-200 hover:bg-white/5"
-      style={{
-        color: getButtonColor(),
-      }}
-      title={copied ? "Copied!" : "Copy to clipboard"}
-    >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
-    </button>
-  );
-}
+    return (
+      <button
+        onClick={handleCopy}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        // Added p-1.5 to keep the click area comfortable
+        className="absolute -top-2 -left-13 cursor-pointer flex items-center justify-center p-1.5 rounded-md transition-all duration-200 hover:bg-white/5"
+        style={{
+          color: getButtonColor(),
+        }}
+        title={copied ? "Copied!" : "Copy to clipboard"}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    );
+  }
 
 
 
   return (
     <div className="flex flex-col h-full pt-10 pb-2 relative">
       {/* messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-10 pb-20 space-y-6">
+      <div className="flex-1 overflow-y-auto px-4 py-10 pb-20 space-y-7">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
@@ -86,33 +86,60 @@ function CopyButton({ text }: { text: string }) {
           </div>
         )}
 
-        {messages.map(msg => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className="max-w-[75%]">
+        {messages.map(msg => {
+          const isUser = msg.role === 'user'
+          // while loading (no content yet) keep the bubble tight around the
+          // thinking dots — only expand to full width once content arrives
+          const isLoading = !isUser && msg.content === ''
+          return (
+          <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+            <div
+              className={
+                isUser
+                  ? 'max-w-[75%]'
+                  : isLoading
+                    ? 'max-w-fit'
+                    : 'max-w-[88%] w-full'
+              }
+            >
               <div
-                className="text-sm leading-relaxed rounded-xl px-4 py-3"
-                style={{
-                  background: msg.role === 'user' ? 'rgba(210,140,160,0.15)' : 'rgba(255,255,255,0.05)',
-                  color: 'rgba(255,255,255,0.87)',
-                  border: msg.role === 'user'
-                    ? '1px solid rgba(210,140,160,0.2)'
-                    : '1px solid rgba(255,255,255,0.07)'
-                }}
+                className={
+                  isUser
+                    ? 'text-sm leading-relaxed rounded-2xl px-4 py-3'
+                    : isLoading
+                      // compact pill around the dots
+                      ? 'leading-relaxed rounded-2xl px-4 py-3 w-fit'
+                      // assistant: open canvas, no boxy border, more breathing room
+                      : 'leading-relaxed rounded-2xl px-5 py-4'
+                }
+                style={
+                  isUser
+                    ? {
+                        background: 'rgba(210,140,160,0.15)',
+                        color: 'rgba(255,255,255,0.87)',
+                        border: '1px solid rgba(210,140,160,0.2)',
+                      }
+                    : {
+                        background: 'rgba(255,255,255,0.025)',
+                        color: 'rgba(255,255,255,0.87)',
+                        border: '1px solid rgba(255,255,255,0.04)',
+                      }
+                }
               >
-                {msg.role === 'user' ? (
+                {isUser ? (
                   // ── User bubble: plain text, no markdown ──
 
                   <div className="flex relative items-start gap-2">
                     <CopyButton text={msg.content} />
                     <span className="whitespace-pre-wrap">{msg.content}</span>
                   </div>
-                  
-                  
+
+
                 ) : (
                   // ── Assistant bubble: formatted markdown ──
                   <FormattedMessage
                     content={msg.content}
-                    isLoading={isStreaming && msg.content === ''}
+                    isLoading={msg.content === ''}
                   />
                 )}
               </div>
@@ -156,7 +183,8 @@ function CopyButton({ text }: { text: string }) {
               )}
             </div>
           </div>
-        ))}
+          )
+        })}
 
         <div ref={bottomRef} />
       </div>
@@ -228,13 +256,13 @@ function CopyButton({ text }: { text: string }) {
             </div>
           )}
 
-{/*comparision */}
+          {/*comparision */}
           {hasDocs.length > 0 && (
             <div className="flex flex-wrap gap-2 w-full">
               {[
-                { label: 'Guidance', icon: '🧭' },
-                { label: 'Analytics', icon: '📊' },
-                { label: 'Compare', icon: '⚖️', disabled: hasDocs.length < 2 },
+                { label: 'Guidance', icon: '🧭' ,disabled: hasDocs.length >1},
+                { label: 'Analytics', icon: '📊' ,disabled: hasDocs.length >1},
+                // { label: 'Compare', icon: '⚖️', disabled: hasDocs.length < 2 },
               ].map(({ label, icon, disabled }) => (
                 <button
                   key={label}

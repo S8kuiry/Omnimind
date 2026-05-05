@@ -2,7 +2,7 @@
 import { useParams } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import { useStream } from '@/lib/useStream'
+import { Message, useStream } from '@/lib/useStream'
 import { uploadPDF, getGuidance, getAnalytics, deleteDocument } from '@/lib/api'
 import TabBar from '@/app/components/session/TabBar'
 import ChatPanel from '@/app/components/session/ChatPanel'
@@ -15,7 +15,7 @@ export default function ChatPage() {
   const userId = session?.user?.id ?? ''  // 👈 use real auth userId not localStorage
   // add to state
 
-
+  const [featureLoading, setFeatureLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('chat')
   const [docName, setDocName] = useState<string | null>(null)
   const [docNames, setDocNames] = useState<string[]>([]);
@@ -24,13 +24,14 @@ export default function ChatPage() {
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
 
-  const { messages, isStreaming, send, loadHistory } = useStream(userId, chatId)
+  const { messages, isStreaming, send, loadHistory,  injectLoading, updateMessage , injectUserMessage} = useStream(userId, chatId)
+  console.log("userId", userId)
 
   // remving the uploaded pdf 
   const handleRemove = async (name: string) => {
     // ✅ remove from UI instantly
     setDocNames(prev => prev.filter(d => d !== name))
-    
+
     try {
       await deleteDocument(name, userId, chatId)
       await fetch(`/api/chat/${chatId}`, {
@@ -82,7 +83,7 @@ export default function ChatPage() {
       const updatedNames = [...docNames, res.doc_name]
       setDocNames(updatedNames)
       setDocName(res.doc_name)
-  
+
       await fetch(`/api/chat/${chatId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -94,25 +95,106 @@ export default function ChatPage() {
   }
 
 
-{/*fecthing doc names  */}
+  {/*fecthing doc names  */ }
   useEffect(() => {
-  if (!chatId) return  // ✅ remove historyLoaded dependency
+    if (!chatId) return  // ✅ remove historyLoaded dependency
 
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
-    .then(r => r.json())
-    .then(data => {
-      if (data.documents?.length > 0) {
-        setDocNames(data.documents)
-      }
+    fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.documents?.length > 0) {
+          setDocNames(data.documents)
+        }
+      })
+  }, [chatId])  // ✅ only depends on chatId
+
+
+  {/** feature handle  */ }
+ const handleFeature = async (type: 'guidance' | 'analytics' | 'compare') => {
+  if (featureLoading) return
+  setFeatureLoading(true)
+
+  const labelMap = {
+    guidance: '🧭 Generate document guidance',
+    analytics: '📊 Analyse this document',
+    compare: '⚖️ Compare documents',
+  }
+
+  // ✅ inject visible user message
+  const userMsg: Message = {
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: labelMap[type],
+  }
+injectUserMessage(labelMap[type])
+
+  // save user message to DB
+  await fetch('/api/chat/save-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatId, userId,
+      role: 'user',
+      content: labelMap[type],
+      title: labelMap[type],
+      metadata: {}
     })
-}, [chatId])  // ✅ only depends on chatId
+  })
+  window.dispatchEvent(new Event('omnimind_chats_updated'))
 
+  const loadingId = crypto.randomUUID()
+  injectLoading(loadingId)
 
-{/** feature handle  */}
-const handleFeature = (type: 'guidance' | 'analytics' | 'compare') => {
-  setActiveTab(type)
+  // ... rest of feature handling same as before
+
+  let assistantContent = ''
+  try {
+    if (type === 'guidance') {
+      const data = await getGuidance(docNames[0], userId, chatId)
+      assistantContent = `**🧭 Document Guidance**\n\n${data.guidance}`
+      updateMessage(loadingId, assistantContent)
+    }
+    if (type === 'analytics') {
+      const data = await getAnalytics(docNames[0], userId, chatId)
+      assistantContent = `**📊 Analytics**\n\n${JSON.stringify(data.analytics, null, 2)}`
+      updateMessage(loadingId, assistantContent)
+    }
+    // if (type === 'compare') {
+    //   const data = await compareDocuments(docNames, userId, chatId)
+    //   assistantContent = `**⚖️ Compare**\n\n${JSON.stringify(data.compare, null, 2)}`
+    //   updateMessage(loadingId, assistantContent)
+    // }
+
+    // ✅ persist assistant reply so it survives reload
+    if (assistantContent) {
+      await fetch('/api/chat/save-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId, userId,
+          role: 'assistant',
+          content: assistantContent,
+          metadata: { mode: type, source: docNames[0] || null }
+        })
+      })
+    }
+  } catch {
+    const errMsg = 'Something went wrong. Please try again.'
+    updateMessage(loadingId, errMsg)
+    await fetch('/api/chat/save-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId, userId,
+        role: 'assistant',
+        content: errMsg,
+        metadata: { mode: type, error: true }
+      })
+    })
+  } finally {
+    setFeatureLoading(false)
+  }
 }
-
 
 
   // don't render until session is ready

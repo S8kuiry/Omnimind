@@ -146,36 +146,31 @@ async def stream(request: QueryRequest):
 
 
 # ── Feature endpoints ──────────────────────────────────────────────
-
 @app.get("/guidance/{doc_name}")
-async def guidance(doc_name: str, user_id: str):
+async def guidance(doc_name: str, user_id: str, chat_id: str = ""):
+    scope = chat_id if chat_id else user_id  # ✅ same as upload/stream
     query_vec = embed_query(f"summary overview key points of {doc_name}")
-    chunks = query_chunks(query_vec, user_id=user_id, top_k=8,
-                          source_filter=doc_name)
+    chunks = query_chunks(query_vec, user_id=scope, top_k=8, source_filter=doc_name)
     if not chunks:
         raise HTTPException(404, f"Document '{doc_name}' not found.")
-
     report = get_guidance(chunks)
     return {"doc_name": doc_name, "guidance": report}
 
 
+
+
 @app.get("/analytics/{doc_name}")
-async def analytics(doc_name: str, user_id: str):
-    query_vec = embed_query(f"main content topics structure of {doc_name}")
-    chunks = query_chunks(query_vec, user_id=user_id, top_k=6,
-                          source_filter=doc_name)
+async def analytics(doc_name: str, user_id: str, chat_id: str = ""):
+    scope = chat_id if chat_id else user_id  # ✅ same as upload/stream
+    query_vec = embed_query(f"summary overview key points of {doc_name}")
+    chunks = query_chunks(query_vec, user_id=scope, top_k=8, source_filter=doc_name)
     if not chunks:
         raise HTTPException(404, f"Document '{doc_name}' not found.")
+    report = get_analytics(chunks)
+    return {"doc_name": doc_name, "analytics": report}
 
-    raw = get_analytics(chunks)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        cleaned = raw.strip().removeprefix("```json").removesuffix("```").strip()
-        data = json.loads(cleaned)
 
-    return {"doc_name": doc_name, "analytics": data}
-
+    
 
 @app.post("/compare")
 async def compare(request: CompareRequest):

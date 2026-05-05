@@ -15,30 +15,49 @@ def _build_context(chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+# def _prompt_qa(question: str, chunks: list[dict]) -> str:
+#     """
+#     Standard Q&A — your upgraded prompt, kept exactly as you wrote it.
+#     Used for all regular chat questions.
+#     """
+#     context = _build_context(chunks)
+#     return f"""You are a High-Performance AI Document Analyst. Your goal is to provide accurate, cited, and context-aware responses.
+
+# ### MANDATORY PROTOCOLS: 
+# 1. **Source Awareness:** Multiple segments from the SAME filename are parts of ONE document — do NOT treat them as separate documents.
+# 2. **Task Adaptation:**
+#    - Specific fact → direct answer with citation.
+#    - Comparison asked → contrast the documents involved.
+#    - Multiple files but question about one → focus on relevant file, ignore others.
+# 3. **Citation Format:** Every statement must cite its source: "The candidate knows React [Source: dev_resume.pdf, Page 2]."
+# 4. **Null Rule:** If not in context, say: "Based on the provided documents, I cannot find information regarding [X]." Do NOT use outside knowledge.
+
+# ### CONTEXT : 
+# {context}
+
+# ### USER QUESTION : 
+# {question}
+
+# ### STRUCTURED ANALYSIS: """
+
 def _prompt_qa(question: str, chunks: list[dict]) -> str:
-    """
-    Standard Q&A — your upgraded prompt, kept exactly as you wrote it.
-    Used for all regular chat questions.
-    """
     context = _build_context(chunks)
-    return f"""You are a High-Performance AI Document Analyst. Your goal is to provide accurate, cited, and context-aware responses.
+    return f"""You are an intelligent document assistant. Answer the user's question naturally and conversationally based on the provided document context.
 
-### MANDATORY PROTOCOLS:
-1. **Source Awareness:** Multiple segments from the SAME filename are parts of ONE document — do NOT treat them as separate documents.
-2. **Task Adaptation:**
-   - Specific fact → direct answer with citation.
-   - Comparison asked → contrast the documents involved.
-   - Multiple files but question about one → focus on relevant file, ignore others.
-3. **Citation Format:** Every statement must cite its source: "The candidate knows React [Source: dev_resume.pdf, Page 2]."
-4. **Null Rule:** If not in context, say: "Based on the provided documents, I cannot find information regarding [X]." Do NOT use outside knowledge.
+### RULES:
+1. **Same filename = same document.** Multiple segments from the same file are one document — never say "Document 1, Document 2" for the same file.
+2. **Be natural.** Answer like a knowledgeable friend, not a structured report. Use bullet points only when listing multiple items makes sense.
+3. **Stay grounded.** Base your answer on the documents. Cite sources inline like: "...React Native experience [Source: resume.pdf, Page 1]."
+4. **Out-of-scope questions.** If the question cannot be answered from the documents, answer from general knowledge and add a brief note: *(This answer is based on general knowledge, not your documents.)*
+5. **No headers unless necessary.** Do not start with "Structured Analysis" or any section header. Just answer directly.
 
-### CONTEXT:
+### DOCUMENT CONTEXT : 
 {context}
 
-### USER QUESTION:
+### QUESTION : 
 {question}
 
-### STRUCTURED ANALYSIS:"""
+### ANSWER : """
 
 
 def _prompt_guidance(chunks: list[dict]) -> str:
@@ -50,7 +69,7 @@ def _prompt_guidance(chunks: list[dict]) -> str:
     context = _build_context(chunks)
     return f"""You are an expert document analyst. Analyse the document segments below and produce a structured intelligence report.
 
-### CONTEXT:
+### CONTEXT : 
 {context}
 
 ### DELIVER EXACTLY THIS STRUCTURE (use these exact headings):
@@ -132,18 +151,6 @@ def _prompt_analytics(chunks: list[dict]) -> str:
 }}"""
 
 
-# ── Public API ─────────────────────────────────────────────────────
-
-# def get_answer(question: str, chunks: list[dict]) -> str:
-#     """Standard Q&A — used by /query endpoint."""
-#     prompt = _prompt_qa(question, chunks)
-#     response = client.chat.completions.create(
-#         model=GROQ_MODEL,
-#         messages=[{"role": "user", "content": prompt}],
-#         temperature=0.1,
-#         max_tokens=1024
-#     )
-#     return response.choices[0].message.content
 
 
 def get_guidance(chunks: list[dict]) -> str:
@@ -182,28 +189,6 @@ def get_analytics(chunks: list[dict]) -> str:
     return response.choices[0].message.content
 
 
-# def stream_answer(question: str, chunks: list[dict]):
-#     """
-#     Streaming version of get_answer — yields tokens as they arrive.
-#     Used by /stream endpoint. Next.js reads this as Server-Sent Events.
-#     """
-#     # if no chunks — stream general knowledge answer
-#     if chunks:
-#         prompt = _prompt_qa(question, chunks)
-#     else:
-#         prompt = question  # raw question to Groq
-
-#     stream = client.chat.completions.create(
-#         model=GROQ_MODEL,
-#         messages=[{"role": "user", "content": prompt}],
-#         temperature=0.1 if chunks else 0.7,
-#         max_tokens=2048 ,
-#         stream=True
-#     )
-#     for chunk in stream:
-#         token = chunk.choices[0].delta.content
-#         if token:
-#             yield token
 
 def stream_answer(question: str, chunks: list[dict], history: list[dict] = []):
     if chunks:

@@ -11,40 +11,75 @@ import { useState } from 'react'
 // jammed lists, missing spacing — makes output Claude-quality regardless
 
 function normalizeMarkdown(raw: string): string {
-  return (
-    raw
-      // literal \n string → real newline
-     .replace(/\[Source:[^\]]*\]/gi, '')   // ✅ first line — nuclear option
-      .replace(/\\n/g, '\n')
+  let s = raw
 
+  // Strip stray source tags that the prompt sometimes leaks
+  s = s.replace(/\[Source:[^\]]*\]/gi, '')
 
-      // "**Heading**===" setext → ## heading
-      .replace(/\*\*(.+?)\*\*\s*={3,}/g, '\n## $1\n')
+  // Literal "\n" string → real newline (some models emit escaped newlines)
+  s = s.replace(/\\n/g, '\n')
 
-      // Numbered list items jammed: "1. foo2. bar" → split
-      .replace(/(\d+\.\s.+?)(?=\d+\.)/g, '$1\n')
+  // ── Heading sanitation ─────────────────────────────────────────────
+  // "##Heading" → "## Heading"
+  s = s.replace(/^(#{1,6})([^\s#])/gm, '$1 $2')
 
-      // Bullet items jammed: "* foo* bar" → split
-      .replace(/([^\n])\*\s/g, '$1\n* ')
+  // "**Heading**===" setext → "## Heading"
+  s = s.replace(/\*\*(.+?)\*\*\s*={3,}/g, '\n## $1\n')
 
-      // Ensure ``` starts on its own line
-      .replace(/([^\n])(```)/g, '$1\n$2')
+  // ── Bold marker repair ─────────────────────────────────────────────
+  // Models very often emit "**Label:**Value" with no space after the
+  // closing bold marker. Add the space so the value is readable.
+  s = s.replace(/(\*\*[^*\n]+?:\*\*)(?=\S)/g, '$1 ')
 
-      // Bold section headers mid-line → give breathing room
-      .replace(/([^\n])\n?(\*\*[A-Z][^*]+:\*\*)/g, '$1\n\n$2')
+  // ── List sanitation ────────────────────────────────────────────────
+  // "1. foo2. bar" → split each enumerated item onto its own line
+  s = s.replace(/(\d+\.\s+[^\n]*?)(?=\s\d+\.\s)/g, '$1\n')
 
-      // Section dividers like "---" or "===" that aren't markdown
-      .replace(/^[-=]{3,}$/gm, '\n---\n')
+  // "* foo* bar" → split bullet items
+  s = s.replace(/([^\s\n*])\s\*\s(?=\S)/g, '$1\n* ')
 
-      // Collapse 3+ newlines → 2
-      .replace(/\n{3,}/g, '\n\n')
+  // Bullet at line start missing space: "*foo" → "* foo"
+  s = s.replace(/^(\s*)\*(?=\S)/gm, '$1* ')
 
-      // Ensure list items have a blank line before the first one
-      .replace(/([^\n])\n([-*]\s)/g, '$1\n\n$2')
-      .replace(/([^\n])\n(\d+\.\s)/g, '$1\n\n$2')
+  // Hyphen bullet at line start missing space: "-foo" → "- foo"
+  s = s.replace(/^(\s*)-(?=[A-Za-z])/gm, '$1- ')
 
-      .trim()
-  )
+  // ── Code fence safety ──────────────────────────────────────────────
+  // Ensure ``` starts on its own line and ends on its own line
+  s = s.replace(/([^\n])(```)/g, '$1\n$2')
+  s = s.replace(/(```\w*)([^\n])/g, '$1\n$2')
+
+  // ── Section / paragraph breathing room ─────────────────────────────
+  // Bold inline label following a sentence → push it to its own block
+  s = s.replace(/([.!?])\s*(\*\*[A-Z][^*\n]{0,80}:\*\*)/g, '$1\n\n$2')
+
+  // Sentence flowing directly into a numbered item: "...overview.1. Foo"
+  s = s.replace(/([.!?])(\d+\.\s)/g, '$1\n\n$2')
+
+  // Sentence flowing directly into a bullet
+  s = s.replace(/([.!?])\s*([-*])\s/g, '$1\n\n$2 ')
+
+  // Heading immediately followed by body on the same line:
+  // "## Heading Body text..." is fine; but "## HeadingBody text" → split
+  // (only applies when no space between heading text and capital letter)
+  // Conservative: leave alone unless we detect "**Title**Body"
+  s = s.replace(/(\*\*[^*\n]+\*\*)([A-Z])/g, '$1\n\n$2')
+
+  // ── Whitespace normalisation ───────────────────────────────────────
+  // Section dividers like "---" / "===" on their own line
+  s = s.replace(/^\s*[-=]{3,}\s*$/gm, '\n---\n')
+
+  // Ensure first list item has a blank line before it
+  s = s.replace(/([^\n])\n([-*]\s)/g, '$1\n\n$2')
+  s = s.replace(/([^\n])\n(\d+\.\s)/g, '$1\n\n$2')
+
+  // Collapse 3+ newlines → 2
+  s = s.replace(/\n{3,}/g, '\n\n')
+
+  // Trim trailing whitespace on each line (avoids stray <br>)
+  s = s.replace(/[ \t]+$/gm, '')
+
+  return s.trim()
 }
 
 // ─── Thinking dots (Claude-style) ────────────────────────────────────────────
@@ -151,9 +186,10 @@ function DownloadButton({ text, filename }: { text: string; filename: string }) 
 // ─── Full message copy + download bar ────────────────────────────────────────
 
 function MessageActions({ content }: { content: string }) {
+  // Rendered at the bottom of the assistant message, Claude/ChatGPT style.
   return (
     <div
-      className="flex items-center gap-3 mt-3 pb-2 mb-2"
+      className="flex items-center gap-4 mb-4 pb-3"
       style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
     >
       <CopyButton text={content} size="xs" />
@@ -176,9 +212,17 @@ export default function FormattedMessage({
   const normalized = normalizeMarkdown(content)
 
   return (
-    <div className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.85)' }}>
-      {/* Copy + download the full message */}
+    <div
+      className="text-[15px] leading-[1.7] [&_li>p]:mb-0 [&_li>p]:inline [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      style={{
+        color: 'rgba(255,255,255,0.86)',
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif',
+      }}
+    >
+       {/* Copy + download bar at the bottom, like Claude / ChatGPT */}
       {content.length > 0 && <MessageActions content={content} />}
+
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -234,15 +278,16 @@ export default function FormattedMessage({
               )
             }
 
-            // inline code
+            // inline code — calmer, monospace, subtle pink tint
             return (
               <code
-                className="rounded px-1.5 py-0.5 font-mono"
+                className="rounded-md px-[6px] py-[2px] font-mono"
                 style={{
-                  background: 'rgba(210,140,160,0.12)',
-                  color: 'rgba(251,146,60,0.95)',
-                  fontSize: '0.82em',
-                  border: '1px solid rgba(210,140,160,0.15)',
+                  background: 'rgba(210,140,160,0.10)',
+                  color: 'rgba(235,200,210,0.95)',
+                  fontSize: '0.86em',
+                  border: '1px solid rgba(210,140,160,0.14)',
+                  whiteSpace: 'nowrap',
                 }}
                 {...props}
               >
@@ -254,10 +299,11 @@ export default function FormattedMessage({
           // ── Headings ─────────────────────────────────────────────────
           h1: ({ children }) => (
             <h1
-              className="text-xl font-bold mt-6 mb-3 pb-2"
+              className="text-[20px] font-semibold tracking-tight mt-7 mb-3 pb-2"
               style={{
-                color: 'rgba(255,255,255,0.95)',
+                color: 'rgba(255,255,255,0.96)',
                 borderBottom: '1px solid rgba(255,255,255,0.08)',
+                letterSpacing: '-0.01em',
               }}
             >
               {children}
@@ -265,24 +311,27 @@ export default function FormattedMessage({
           ),
           h2: ({ children }) => (
             <h2
-              className="text-base font-semibold mt-5 mb-2"
-              style={{ color: 'rgba(255,255,255,0.9)' }}
+              className="text-[17px] font-semibold tracking-tight mt-6 mb-2.5"
+              style={{
+                color: 'rgba(255,255,255,0.94)',
+                letterSpacing: '-0.01em',
+              }}
             >
               {children}
             </h2>
           ),
           h3: ({ children }) => (
             <h3
-              className="text-sm font-semibold mt-4 mb-1.5"
-              style={{ color: 'rgba(210,140,160,0.95)' }}
+              className="text-[15px] font-semibold mt-5 mb-2"
+              style={{ color: 'rgba(232,182,196,0.95)' }}
             >
               {children}
             </h3>
           ),
           h4: ({ children }) => (
             <h4
-              className="text-xs font-semibold mt-3 mb-1 uppercase tracking-wider"
-              style={{ color: 'rgba(255,255,255,0.5)' }}
+              className="text-[13px] font-semibold mt-4 mb-1.5"
+              style={{ color: 'rgba(255,255,255,0.78)' }}
             >
               {children}
             </h4>
@@ -290,39 +339,48 @@ export default function FormattedMessage({
 
           // ── Paragraphs ────────────────────────────────────────────────
           p: ({ children }) => (
-            <p className="mb-3" style={{ color: 'rgba(255,255,255,0.82)', lineHeight: '1.75' }}>
+            <p
+              className="mb-4"
+              style={{ color: 'rgba(255,255,255,0.84)', lineHeight: '1.7' }}
+            >
               {children}
             </p>
           ),
 
           // ── Lists ─────────────────────────────────────────────────────
+          // Use semantic list markers + custom marker styling so ordered
+          // and unordered lists are visually distinct (Claude-style).
           ul: ({ children }) => (
-            <ul className="mb-3 space-y-1.5 pl-0">{children}</ul>
+            <ul
+              className="mb-3 mt-1 space-y-1.5 pl-5 list-disc marker:text-[rgba(210,140,160,0.7)]"
+            >
+              {children}
+            </ul>
           ),
           ol: ({ children }) => (
-            <ol className="mb-3 space-y-1.5 pl-0 list-decimal list-inside">{children}</ol>
+            <ol
+              className="mb-3 mt-1 space-y-1.5 pl-5 list-decimal marker:text-[rgba(210,140,160,0.85)] marker:font-medium"
+            >
+              {children}
+            </ol>
           ),
           li: ({ children }) => (
-            <li className="flex gap-2.5 items-start" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              <span
-                className="mt-[7px] shrink-0 rounded-full"
-                style={{
-                  width: '5px',
-                  height: '5px',
-                  background: 'rgba(210,140,160,0.7)',
-                }}
-              />
-              <span className="flex-1">{children}</span>
+            <li
+              className="leading-relaxed pl-1"
+              style={{ color: 'rgba(255,255,255,0.82)' }}
+            >
+              {children}
             </li>
           ),
 
           // ── Blockquote ────────────────────────────────────────────────
           blockquote: ({ children }) => (
             <blockquote
-              className="my-3 pl-4 italic"
+              className="my-4 pl-4 py-1"
               style={{
-                borderLeft: '2px solid rgba(210,140,160,0.4)',
-                color: 'rgba(255,255,255,0.55)',
+                borderLeft: '2px solid rgba(210,140,160,0.5)',
+                color: 'rgba(255,255,255,0.65)',
+                fontStyle: 'italic',
               }}
             >
               {children}
@@ -331,7 +389,13 @@ export default function FormattedMessage({
 
           // ── HR ────────────────────────────────────────────────────────
           hr: () => (
-            <hr className="my-5" style={{ borderColor: 'rgba(255,255,255,0.08)' }} />
+            <hr
+              className="my-6"
+              style={{
+                border: 'none',
+                borderTop: '1px solid rgba(255,255,255,0.07)',
+              }}
+            />
           ),
 
           // ── Links ─────────────────────────────────────────────────────
@@ -349,12 +413,17 @@ export default function FormattedMessage({
 
           // ── Strong / Em ───────────────────────────────────────────────
           strong: ({ children }) => (
-            <strong className="font-semibold" style={{ color: 'rgba(255,255,255,0.95)' }}>
+            <strong
+              className="font-semibold"
+              style={{ color: 'rgba(255,255,255,0.97)' }}
+            >
               {children}
             </strong>
           ),
           em: ({ children }) => (
-            <em style={{ color: 'rgba(255,255,255,0.65)' }}>{children}</em>
+            <em style={{ color: 'rgba(255,255,255,0.7)', fontStyle: 'italic' }}>
+              {children}
+            </em>
           ),
 
           // ── Tables ────────────────────────────────────────────────────
@@ -402,7 +471,7 @@ export default function FormattedMessage({
         {normalized}
       </ReactMarkdown>
 
-      
+     
     </div>
   )
 }

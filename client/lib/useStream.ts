@@ -25,6 +25,30 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
   const [isStreaming, setIsStreaming] = useState(false)
   const [title, setTitle] = useState("")
 
+  const injectUserMessage = useCallback((content: string) => {
+  setMessages(prev => [...prev, {
+    id: crypto.randomUUID(),
+    role: 'user' as const,
+    content,
+  }])
+}, [])
+
+  const injectLoading = useCallback((id: string) => {
+    setMessages(prev => [...prev, {
+      id,
+      role: 'assistant' as const,
+      content: '',
+    }])
+  }, [])
+
+  const updateMessage = useCallback((id: string, content: string) => {
+    setMessages(prev => prev.map(m =>
+      m.id === id ? { ...m, content } : m
+    ))
+  }, [])
+
+
+
   // called from ChatPage when history loads — replaces empty state
   const loadHistory = useCallback((history: Message[]) => {
     setMessages(history)
@@ -138,5 +162,5 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
       setIsStreaming(false)
     }
   }, [userId, chatId, messages.length, title])
-  return { messages, isStreaming, send, loadHistory, title }
+  return { messages, isStreaming, send, loadHistory, title, injectLoading, updateMessage, injectUserMessage }
 }
