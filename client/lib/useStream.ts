@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { createStreamSanitizer, stripReasoningBlocks } from './sanitizeModelOutput'
 import { streamQuery } from './api'
 import { updateChatTitle } from './session'
 import autoNameChat from './autoNameChat'
+import { buildHistoryPayload } from './conversation'
 
 export interface Message {
   id: string
@@ -24,6 +25,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
   console.log('chat-id : ', chatId)
   const [messages, setMessages] = useState<Message[]>(initialMessages) // 👈 accepts history
   const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
 
   const injectUserMessage = useCallback((content: string) => {
@@ -55,14 +57,18 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     setMessages(history)
   }, [])
 
+  const streamingMsgIdRef = useRef<string | null>(null)
+  const pendingContentRef = useRef('')
+  const flushRafRef = useRef<number | null>(null)
+  const lastFlushMsRef = useRef(0)
+  const STREAM_FLUSH_MS = 80
+
   const send = useCallback(async (question: string) => {
     const start = Date.now()
-    // ✅ capture history BEFORE adding empty assistant message
-    const history = messages
-      .slice(-16)
-      .map(m => ({ role: m.role, content: m.content }))
-      .filter(m => m.content.trim() !== '')  // ✅ filter empty messages
-    console.log('history being sent:', history)  // ✅ add this
+    const history = buildHistoryPayload(
+      messages.map(m => ({ role: m.role, content: m.content })),
+      question
+    )
 
 
 
@@ -71,6 +77,9 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: question }
     setMessages(prev => [...prev, userMsg])
     const assistantId = crypto.randomUUID()
+    streamingMsgIdRef.current = assistantId
+    setStreamingMessageId(assistantId)
+    pendingContentRef.current = ''
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
     // only name on first message
@@ -91,6 +100,11 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
 
 
       const response = await streamQuery(question, userId, chatId, history, model)
+      await fetch(`/api/llm/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model })
+      })
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -99,6 +113,38 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
 
 
       const sanitizer = createStreamSanitizer()
+
+      const flushPending = (id: string) => {
+        const chunk = pendingContentRef.current
+        if (!chunk) return
+        pendingContentRef.current = ''
+        setMessages(prev =>
+          prev.map(m => (m.id === id ? { ...m, content: m.content + chunk } : m))
+        )
+      }
+
+      const scheduleFlush = (id: string) => {
+        const now = Date.now()
+        const elapsed = now - lastFlushMsRef.current
+        const run = () => {
+          flushRafRef.current = null
+          lastFlushMsRef.current = Date.now()
+          flushPending(id)
+        }
+        if (elapsed >= STREAM_FLUSH_MS) {
+          if (flushRafRef.current != null) {
+            cancelAnimationFrame(flushRafRef.current)
+            flushRafRef.current = null
+          }
+          run()
+          return
+        }
+        if (flushRafRef.current != null) return
+        flushRafRef.current = requestAnimationFrame(() => {
+          if (Date.now() - lastFlushMsRef.current >= STREAM_FLUSH_MS) run()
+          else scheduleFlush(id)
+        })
+      }
 
       while (true) {
         const { done, value } = await reader.read()
@@ -142,23 +188,26 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
             raw
               .replace(/\[Source:[^\]]*\]/gi, '')
               .replace(/\[SOURCES\].*$/g, '')
-              .replace(/[ \t]{2,}/g, ' ')
           )
 
           if (!sanitized.trim()) continue
           fullResponse += sanitized
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + sanitized } : m
-          ))
+          pendingContentRef.current += sanitized
+          scheduleFlush(assistantId)
         }
       }
+
+      if (flushRafRef.current != null) {
+        cancelAnimationFrame(flushRafRef.current)
+        flushRafRef.current = null
+      }
+      flushPending(assistantId)
 
       const tail = sanitizer.flush()
       if (tail.trim()) {
         fullResponse += tail
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId ? { ...m, content: m.content + tail } : m
-        ))
+        pendingContentRef.current = tail
+        flushPending(assistantId)
       }
 
       fullResponse = stripReasoningBlocks(fullResponse)
@@ -178,8 +227,20 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
           ? { ...m, content: 'Something went wrong. Please try again.' } : m
       ))
     } finally {
+      streamingMsgIdRef.current = null
+      setStreamingMessageId(null)
       setIsStreaming(false)
     }
-  }, [userId, chatId, messages.length, title, model])
-  return { messages, isStreaming, send, loadHistory, title, injectLoading, updateMessage, injectUserMessage }
+  }, [userId, chatId, messages, title, model])
+  return {
+    messages,
+    isStreaming,
+    streamingMessageId,
+    send,
+    loadHistory,
+    title,
+    injectLoading,
+    updateMessage,
+    injectUserMessage,
+  }
 }

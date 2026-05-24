@@ -1,5 +1,11 @@
 from groq import Groq
 from config import GROQ_API_KEY, GROQ_MODEL
+from services.conversation import (
+    is_conversational,
+    trim_history,
+    CHAT_SYSTEM,
+    DOC_SYSTEM,
+)
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -50,7 +56,8 @@ def _prompt_qa(question: str, chunks: list[dict]) -> str:
 3. **Stay grounded.** Base your answer on the documents. Cite sources inline like: "...React Native experience [Source: resume.pdf, Page 1]."
 4. **Out-of-scope questions.** If the question cannot be answered from the documents, answer from general knowledge and add a brief note: *(This answer is based on general knowledge, not your documents.)*
 5. **No headers unless necessary.** Do not start with "Structured Analysis" or any section header. Just answer directly.
-6. **Clean markdown only.** Use GitHub-flavored markdown with blank lines before headings, lists, and tables. Never output thinking tags, XML, or internal reasoning. Start your answer immediately with helpful content.
+6. **Clean markdown only.** For tutorials use ### step headings, bullets, and blockquote tips — never one giant table containing the whole answer. Never put ### headings inside table cells. No HTML (<br>, <ul>). No thinking tags or XML.
+7. Start your answer immediately with helpful content.
 
 ### DOCUMENT CONTEXT : 
 {context}
@@ -192,28 +199,33 @@ def get_analytics(chunks: list[dict]) -> str:
 
 
 def stream_answer(question: str, chunks: list[dict], history: list[dict] = [], model: str = GROQ_MODEL):
-    if chunks:
-        prompt = _prompt_qa(question, chunks)
-    else:
-        prompt = question
+    conversational = is_conversational(question)
+    trimmed = trim_history(history, max_messages=8, max_chars=600)
 
-    # build messages with history
-    messages = []
-    
-    # add previous turns
-    for msg in history[-6:]:  # last 6 messages = 3 exchanges
-        messages.append({
-            "role": msg["role"],
-            "content": msg["content"]
-        })
-    
-    # add current question with context
-    messages.append({"role": "user", "content": prompt})
+    # Social turns: chat mode — no document dump, minimal history
+    if conversational:
+        messages = [{"role": "system", "content": CHAT_SYSTEM}]
+        for msg in trimmed[-4:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": question})
+        temperature = 0.6
+    elif chunks:
+        messages = [{"role": "system", "content": DOC_SYSTEM}]
+        for msg in trimmed:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": _prompt_qa(question, chunks)})
+        temperature = 0.15
+    else:
+        messages = [{"role": "system", "content": CHAT_SYSTEM}]
+        for msg in trimmed:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": question})
+        temperature = 0.7
 
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0.1 if chunks else 0.7,
+        temperature=temperature,
         max_tokens=2048,
         stream=True
     )

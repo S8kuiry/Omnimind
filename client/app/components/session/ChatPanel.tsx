@@ -4,9 +4,10 @@ import type { Message } from '@/lib/useStream'
 import FormattedMessage from '../FormattedMessage'
 import { ArrowDown01Icon, ArrowDownIcon, Check, Copy } from 'lucide-react'
 
-export default function ChatPanel({ messages, isStreaming, onSend, onUpload, uploading, onFeature, hasDocs, onRemove, model, setModel }: {
+export default function ChatPanel({ messages, isStreaming, streamingMessageId, onSend, onUpload, uploading, onFeature, hasDocs, onRemove, model, setModel }: {
   messages: Message[]
   isStreaming: boolean
+  streamingMessageId?: string | null
   model: string
   setModel: (m: string) => void
   onSend: (q: string) => void
@@ -103,14 +104,14 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
           // thinking dots — only expand to full width once content arrives
           const isLoading = !isUser && msg.content === ''
           return (
-            <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id} className={`flex min-w-0 ${isUser ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={
                   isUser
-                    ? 'max-w-[75%]'
+                    ? 'max-w-[75%] min-w-0'
                     : isLoading
-                      ? 'max-w-fit'
-                      : 'max-w-[88%] w-full'
+                      ? 'max-w-fit min-w-0'
+                      : 'max-w-[88%] min-w-0 w-full'
                 }
               >
                 <div
@@ -151,6 +152,7 @@ export default function ChatPanel({ messages, isStreaming, onSend, onUpload, upl
                     <FormattedMessage
                       content={msg.content}
                       isLoading={msg.content === ''}
+                      isStreaming={isStreaming && msg.id === streamingMessageId && msg.content.length > 0}
                     />
                   )}
                 </div>

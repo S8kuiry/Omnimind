@@ -39,7 +39,7 @@ export default function ChatPage() {
     if (chatId) sessionStorage.setItem(modelStorageKey(chatId), m)
   }
 
-  const { messages, isStreaming, send, loadHistory,  injectLoading, updateMessage , injectUserMessage} = useStream(userId, chatId, [], model)
+  const { messages, isStreaming, streamingMessageId, send, loadHistory, injectLoading, updateMessage, injectUserMessage } = useStream(userId, chatId, [], model)
   console.log("userId", userId)
 
   // remving the uploaded pdf 
@@ -231,6 +231,7 @@ injectUserMessage(labelMap[type])
           <ChatPanel
             messages={messages}
             isStreaming={isStreaming}
+            streamingMessageId={streamingMessageId}
             onSend={send}
             onUpload={handleUpload}
             uploading={uploading}

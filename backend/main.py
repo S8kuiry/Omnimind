@@ -18,6 +18,7 @@ from services.llm import (
      get_guidance,
     get_comparison, get_analytics, stream_answer
 )
+from services.conversation import is_conversational
 from config import TOP_K_RESULTS, GROQ_MODEL, ALLOWED_MODELS
 
 
@@ -117,11 +118,11 @@ async def upload_pdf(
 
 @app.post("/stream")
 async def stream(request: QueryRequest):
-    print("history received:", request.history)  # 👈 add this
-
-    query_vec = embed_query(request.question)
     scope = request.chat_id or request.user_id
-    chunks = query_chunks(query_vec, user_id=scope, top_k=8)
+    chunks: list[dict] = []
+    if not is_conversational(request.question):
+        query_vec = embed_query(request.question)
+        chunks = query_chunks(query_vec, user_id=scope, top_k=8)
 
     def event_generator():
         full_response = ""
