@@ -214,7 +214,7 @@ function splitMegaPipeLine(line: string): string[] {
   let s = line.trim()
   const out: string[] = []
 
-  const headInTable = s.match(/^\|\s*(#{1,6}\s+[^|]+)\s*\|(.*)$/s)
+  const headInTable = s.match(/^\|\s*(#{1,6}\s+[^|]+)\s*\|([\s\S]*)$/)
   if (headInTable) {
     out.push(headInTable[1].trim())
     out.push('')
@@ -226,7 +226,9 @@ function splitMegaPipeLine(line: string): string[] {
     seg = seg.trim()
     if (!seg) continue
 
-    const subHead = seg.match(/^(#{1,6}\s+[^|]+)\s*\|(.*)$/s) || seg.match(/^\|\s*(#{1,6}\s+[^|]+)\s*\|(.*)$/s)
+    const subHead =
+      seg.match(/^(#{1,6}\s+[^|]+)\s*\|([\s\S]*)$/) ||
+      seg.match(/^\|\s*(#{1,6}\s+[^|]+)\s*\|([\s\S]*)$/)
     if (subHead) {
       out.push('', subHead[1].trim(), '')
       seg = subHead[2].trim()
