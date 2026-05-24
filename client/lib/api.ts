@@ -57,10 +57,10 @@ export async function compareDocuments(question: string, userId: string, docA: s
 }
 
 // stream returns a ReadableStream — consumed by useStream hook
-export function streamQuery(question: string, userId: string, chatId: string,history: {role: string, content: string}[] = []): Promise<Response> {
+export function streamQuery(question: string, userId: string, chatId: string, history: {role: string, content: string}[] = [], model?: string): Promise<Response> {
   return fetch(`${API}/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, user_id: userId, chat_id: chatId, history })
+    body: JSON.stringify({ question, user_id: userId, chat_id: chatId, history, model })
   })
 }

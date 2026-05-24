@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { createStreamSanitizer, stripReasoningBlocks } from './sanitizeModelOutput'
 import { streamQuery } from './api'
 import { updateChatTitle } from './session'
 import autoNameChat from './autoNameChat'
@@ -19,7 +20,7 @@ async function saveMessage(payload: object) {
   })
 }
 
-export function useStream(userId: string, chatId: string, initialMessages: Message[] = []) {
+export function useStream(userId: string, chatId: string, initialMessages: Message[] = [], model: string = 'llama-3.1-8b-instant') {
   console.log('chat-id : ', chatId)
   const [messages, setMessages] = useState<Message[]>(initialMessages) // 👈 accepts history
   const [isStreaming, setIsStreaming] = useState(false)
@@ -58,7 +59,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     const start = Date.now()
     // ✅ capture history BEFORE adding empty assistant message
     const history = messages
-      .slice(-15)
+      .slice(-16)
       .map(m => ({ role: m.role, content: m.content }))
       .filter(m => m.content.trim() !== '')  // ✅ filter empty messages
     console.log('history being sent:', history)  // ✅ add this
@@ -89,13 +90,15 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     try {
 
 
-      const response = await streamQuery(question, userId, chatId, history)
+      const response = await streamQuery(question, userId, chatId, history, model)
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
 
 
 
+
+      const sanitizer = createStreamSanitizer()
 
       while (true) {
         const { done, value } = await reader.read()
@@ -135,24 +138,38 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
             continue
           }
 
-          const clean = raw
-            .replace(/\[Source:[^\]]*\]/gi, '')
-            .replace(/\[SOURCES\].*$/g, '')
-            // ✅ only collapse runs of spaces/tabs — never newlines.
-            // Collapsing \n killed code blocks (everything became one line).
-            .replace(/[ \t]{2,}/g, ' ')
+          const sanitized = sanitizer.push(
+            raw
+              .replace(/\[Source:[^\]]*\]/gi, '')
+              .replace(/\[SOURCES\].*$/g, '')
+              .replace(/[ \t]{2,}/g, ' ')
+          )
 
-          if (!clean.trim()) continue
-          fullResponse += clean
+          if (!sanitized.trim()) continue
+          fullResponse += sanitized
           setMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: m.content + clean } : m
+            m.id === assistantId ? { ...m, content: m.content + sanitized } : m
           ))
         }
       }
 
+      const tail = sanitizer.flush()
+      if (tail.trim()) {
+        fullResponse += tail
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? { ...m, content: m.content + tail } : m
+        ))
+      }
+
+      fullResponse = stripReasoningBlocks(fullResponse)
+
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId ? { ...m, content: fullResponse } : m
+      ))
+
       await saveMessage({
         chatId, userId, role: 'assistant', content: fullResponse,
-        metadata: { mode: 'general', model: 'llama-3.1-8b-instant', latencyMs: Date.now() - start }
+        metadata: { mode: 'general', model, latencyMs: Date.now() - start }
       })
 
     } catch (err) {
@@ -163,6 +180,6 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     } finally {
       setIsStreaming(false)
     }
-  }, [userId, chatId, messages.length, title])
+  }, [userId, chatId, messages.length, title, model])
   return { messages, isStreaming, send, loadHistory, title, injectLoading, updateMessage, injectUserMessage }
 }

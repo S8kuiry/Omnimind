@@ -50,6 +50,7 @@ def _prompt_qa(question: str, chunks: list[dict]) -> str:
 3. **Stay grounded.** Base your answer on the documents. Cite sources inline like: "...React Native experience [Source: resume.pdf, Page 1]."
 4. **Out-of-scope questions.** If the question cannot be answered from the documents, answer from general knowledge and add a brief note: *(This answer is based on general knowledge, not your documents.)*
 5. **No headers unless necessary.** Do not start with "Structured Analysis" or any section header. Just answer directly.
+6. **Clean markdown only.** Use GitHub-flavored markdown with blank lines before headings, lists, and tables. Never output thinking tags, XML, or internal reasoning. Start your answer immediately with helpful content.
 
 ### DOCUMENT CONTEXT : 
 {context}
@@ -190,7 +191,7 @@ def get_analytics(chunks: list[dict]) -> str:
 
 
 
-def stream_answer(question: str, chunks: list[dict], history: list[dict] = []):
+def stream_answer(question: str, chunks: list[dict], history: list[dict] = [], model: str = GROQ_MODEL):
     if chunks:
         prompt = _prompt_qa(question, chunks)
     else:
@@ -210,7 +211,7 @@ def stream_answer(question: str, chunks: list[dict], history: list[dict] = []):
     messages.append({"role": "user", "content": prompt})
 
     stream = client.chat.completions.create(
-        model=GROQ_MODEL,
+        model=model,
         messages=messages,
         temperature=0.1 if chunks else 0.7,
         max_tokens=2048,

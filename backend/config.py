@@ -22,6 +22,13 @@ HF_EMBEDDING_URL   = f"https://api-inference.huggingface.co/models/{HF_EMBEDDING
 
 GROQ_MODEL         = "llama-3.1-8b-instant"
 
+ALLOWED_MODELS = {
+    "llama-3.1-8b-instant",
+    "qwen/qwen3-32b",
+    "allam-2-7b",
+    "openai/gpt-oss-120b",
+}
+
 CHUNK_SIZE         = 500
 CHUNK_OVERLAP      = 50
 TOP_K_RESULTS      = 8

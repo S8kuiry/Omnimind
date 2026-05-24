@@ -5,31 +5,50 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Copy, Check, Terminal, Download } from 'lucide-react'
 import { useState } from 'react'
+import { stripReasoningBlocks } from '@/lib/sanitizeModelOutput'
 
 // ─── Normalize streamed markdown ──────────────────────────────────────────────
 // Handles models that return literal \n instead of newlines,
 // jammed lists, missing spacing — makes output Claude-quality regardless
 
 function normalizeMarkdown(raw: string): string {
-  let s = raw
+  let s = stripReasoningBlocks(raw)
 
-  // Strip stray source tags that the prompt sometimes leaks
+  // Strip stray source / page tags that the prompt sometimes leaks
   s = s.replace(/\[Source:[^\]]*\]/gi, '')
+  s = s.replace(/\s*\[Page\s*[\d‑\-–—]+\]/gi, '')
 
   // Literal "\n" string → real newline (some models emit escaped newlines)
   s = s.replace(/\\n/g, '\n')
+
+  // ── Section breaks jammed together ─────────────────────────────────
+  // "text.---### 1." or "---## Heading"
+  s = s.replace(/---+(?=#{1,6})/g, '\n\n---\n\n')
+  s = s.replace(/([.!?)\]])\s*---+/g, '$1\n\n---')
+  s = s.replace(/---+\s*(?=#{1,6}|\*\*[A-Z])/g, '\n\n---\n\n')
 
   // ── Heading sanitation ─────────────────────────────────────────────
   // "##Heading" → "## Heading"
   s = s.replace(/^(#{1,6})([^\s#])/gm, '$1 $2')
 
+  // "###1." style numbered headings
+  s = s.replace(/^(#{1,6})\s*(\d+\.)/gm, '$1 $2')
+
   // "**Heading**===" setext → "## Heading"
   s = s.replace(/\*\*(.+?)\*\*\s*={3,}/g, '\n## $1\n')
+
+  // Bold title immediately followed by heading/body
+  s = s.replace(/\*\*([^*\n]+)\*\*(?=#{1,6})/g, '**$1**\n\n')
 
   // ── Bold marker repair ─────────────────────────────────────────────
   // Models very often emit "**Label:**Value" with no space after the
   // closing bold marker. Add the space so the value is readable.
   s = s.replace(/(\*\*[^*\n]+?:\*\*)(?=\S)/g, '$1 ')
+
+  // ── Table row repair ───────────────────────────────────────────────
+  // Jammed header/separator: "| col ||---|" → newline between rows
+  s = s.replace(/(\|[^\n|]+)\|\|(-+)/g, '$1|\n|$2')
+  s = s.replace(/(\|[^\n]+)\|\|(\|)/g, '$1|\n|$2')
 
   // ── List sanitation ────────────────────────────────────────────────
   // "1. foo2. bar" → split each enumerated item onto its own line
@@ -69,12 +88,13 @@ function normalizeMarkdown(raw: string): string {
   // Sentence flowing directly into a numbered item: "...overview.1. Foo"
   s = s.replace(/([.!?])(\d+\.\s)/g, '$1\n\n$2')
 
+  // Sentence flowing directly into a heading
+  s = s.replace(/([.!?])\s*(#{1,6}\s)/g, '$1\n\n$2')
+
   // Sentence flowing directly into a bullet
   s = s.replace(/([.!?])\s*([-*])\s/g, '$1\n\n$2 ')
 
   // Heading immediately followed by body on the same line:
-  // "## Heading Body text..." is fine; but "## HeadingBody text" → split
-  // (only applies when no space between heading text and capital letter)
   // Conservative: leave alone unless we detect "**Title**Body"
   s = s.replace(/(\*\*[^*\n]+\*\*)([A-Z])/g, '$1\n\n$2')
 
@@ -85,6 +105,9 @@ function normalizeMarkdown(raw: string): string {
   // Ensure first list item has a blank line before it
   s = s.replace(/([^\n])\n([-*]\s)/g, '$1\n\n$2')
   s = s.replace(/([^\n])\n(\d+\.\s)/g, '$1\n\n$2')
+
+  // Ensure blank line before markdown tables
+  s = s.replace(/([^\n])\n(\|[^\n]+\|)/g, '$1\n\n$2')
 
   // Collapse 3+ newlines → 2
   s = s.replace(/\n{3,}/g, '\n\n')
@@ -199,11 +222,10 @@ function DownloadButton({ text, filename }: { text: string; filename: string }) 
 // ─── Full message copy + download bar ────────────────────────────────────────
 
 function MessageActions({ content }: { content: string }) {
-  // Rendered at the bottom of the assistant message, Claude/ChatGPT style.
   return (
     <div
-      className="flex items-center gap-4 mb-4 pb-3"
-      style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+      className="flex items-center gap-4 mt-5 pt-3"
+      style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
     >
       <CopyButton text={content} size="xs" />
       <DownloadButton text={content} filename="omnimind-response.md" />
@@ -226,16 +248,13 @@ export default function FormattedMessage({
 
   return (
     <div
-      className="text-[15px] leading-[1.7] [&_li>p]:mb-0 [&_li>p]:inline [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      className="text-[15px] leading-[1.7] [&_li>p]:mb-0 [&_li>p]:inline [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0"
       style={{
         color: 'rgba(255,255,255,0.86)',
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif',
       }}
     >
-       {/* Copy + download bar at the bottom, like Claude / ChatGPT */}
-      {content.length > 0 && <MessageActions content={content} />}
-
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -324,10 +343,11 @@ export default function FormattedMessage({
           ),
           h2: ({ children }) => (
             <h2
-              className="text-[17px] font-semibold tracking-tight mt-6 mb-2.5"
+              className="text-[17px] font-semibold tracking-tight mt-8 mb-3 pb-2"
               style={{
                 color: 'rgba(255,255,255,0.94)',
                 letterSpacing: '-0.01em',
+                borderBottom: '1px solid rgba(210,140,160,0.15)',
               }}
             >
               {children}
@@ -389,11 +409,11 @@ export default function FormattedMessage({
           // ── Blockquote ────────────────────────────────────────────────
           blockquote: ({ children }) => (
             <blockquote
-              className="my-4 pl-4 py-1"
+              className="my-5 pl-4 py-3 pr-4 rounded-r-lg"
               style={{
-                borderLeft: '2px solid rgba(210,140,160,0.5)',
-                color: 'rgba(255,255,255,0.65)',
-                fontStyle: 'italic',
+                borderLeft: '3px solid rgba(210,140,160,0.55)',
+                background: 'rgba(210,140,160,0.06)',
+                color: 'rgba(255,255,255,0.78)',
               }}
             >
               {children}
@@ -442,19 +462,22 @@ export default function FormattedMessage({
           // ── Tables ────────────────────────────────────────────────────
           table: ({ children }) => (
             <div
-              className="overflow-x-auto my-4 rounded-xl"
-              style={{ border: '1px solid rgba(255,255,255,0.08)' }}
+              className="overflow-x-auto my-5 rounded-xl"
+              style={{
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(0,0,0,0.2)',
+              }}
             >
-              <table className="w-full text-left text-sm border-collapse">{children}</table>
+              <table className="w-full text-left text-sm border-collapse min-w-[480px]">{children}</table>
             </div>
           ),
           th: ({ children }) => (
             <th
-              className="px-4 py-2.5 text-xs uppercase tracking-wider font-semibold"
+              className="px-4 py-3 text-[11px] uppercase tracking-wider font-semibold"
               style={{
-                background: 'rgba(255,255,255,0.04)',
-                color: 'rgba(255,255,255,0.45)',
-                borderBottom: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(210,140,160,0.08)',
+                color: 'rgba(210,140,160,0.85)',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
               }}
             >
               {children}
@@ -462,18 +485,20 @@ export default function FormattedMessage({
           ),
           td: ({ children }) => (
             <td
-              className="px-4 py-2.5"
+              className="px-4 py-3 align-top"
               style={{
-                color: 'rgba(255,255,255,0.75)',
-                borderTop: '1px solid rgba(255,255,255,0.04)',
+                color: 'rgba(255,255,255,0.78)',
+                borderTop: '1px solid rgba(255,255,255,0.05)',
+                lineHeight: '1.55',
               }}
             >
               {children}
             </td>
           ),
           tr: ({ children }) => (
-            <tr style={{ transition: 'background 0.15s' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
+            <tr
+              style={{ transition: 'background 0.15s' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.025)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               {children}
@@ -484,7 +509,7 @@ export default function FormattedMessage({
         {normalized}
       </ReactMarkdown>
 
-     
+      {content.length > 0 && <MessageActions content={normalized} />}
     </div>
   )
 }

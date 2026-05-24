@@ -18,7 +18,7 @@ from services.llm import (
      get_guidance,
     get_comparison, get_analytics, stream_answer
 )
-from config import TOP_K_RESULTS
+from config import TOP_K_RESULTS, GROQ_MODEL, ALLOWED_MODELS
 
 
 # ── Startup: run TTL cleanup when server boots ─────────────────────
@@ -51,6 +51,13 @@ class QueryRequest(BaseModel):
     chat_id: str | None = None   # which chat session
     source_type: str = "pdf"
     history: list[dict] = []  # ✅ add this
+    model: str | None = None
+
+
+def _resolve_model(model: str | None) -> str:
+    if model and model in ALLOWED_MODELS:
+        return model
+    return GROQ_MODEL
 
 
 class CompareRequest(BaseModel):
@@ -121,7 +128,8 @@ async def stream(request: QueryRequest):
         for token in stream_answer(
             request.question,
             chunks,
-            history=request.history or []
+            history=request.history or [],
+            model=_resolve_model(request.model),
         ):
             full_response += token
             yield f"data: {token}\n\n"

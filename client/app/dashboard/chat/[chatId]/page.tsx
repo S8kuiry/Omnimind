@@ -9,6 +9,9 @@ import ChatPanel from '@/app/components/session/ChatPanel'
 
 type Tab = 'chat' | 'guidance' | 'analytics' | 'compare'
 
+const DEFAULT_MODEL = 'llama-3.1-8b-instant'
+const modelStorageKey = (chatId: string) => `omnimind-model-${chatId}`
+
 export default function ChatPage() {
   const { chatId } = useParams<{ chatId: string }>()
   const { data: session } = useSession()
@@ -23,8 +26,20 @@ export default function ChatPage() {
   const [guidanceData, setGuidanceData] = useState<any>(null)
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [model, setModelState] = useState<string>(DEFAULT_MODEL)
 
-  const { messages, isStreaming, send, loadHistory,  injectLoading, updateMessage , injectUserMessage} = useStream(userId, chatId)
+  useEffect(() => {
+    if (!chatId) return
+    const saved = sessionStorage.getItem(modelStorageKey(chatId))
+    if (saved) setModelState(saved)
+  }, [chatId])
+
+  const setModel = (m: string) => {
+    setModelState(m)
+    if (chatId) sessionStorage.setItem(modelStorageKey(chatId), m)
+  }
+
+  const { messages, isStreaming, send, loadHistory,  injectLoading, updateMessage , injectUserMessage} = useStream(userId, chatId, [], model)
   console.log("userId", userId)
 
   // remving the uploaded pdf 
@@ -222,7 +237,8 @@ injectUserMessage(labelMap[type])
             hasDocs={docNames}
             onRemove={handleRemove}
             onFeature={handleFeature}
-
+            model={model}
+            setModel={setModel}
           />
         )}
       </div>
