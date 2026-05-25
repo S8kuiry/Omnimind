@@ -308,6 +308,7 @@ injectUserMessage(labelMap[type])
             sectionContext={sourcePanel.sectionContext}
             userId={userId}
             chatId={chatId}
+            knownDocs={docNames}
             onClose={() => setSourcePanel(null)}
           />
         </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import type { SourceRef } from '@/lib/sectionSources'
+import { normalizeDocName } from '@/lib/docName'
 
 /** Short doc label for inline chips, e.g. `Resume_Final-p1` */
 export function formatSourceChipLabel(source: SourceRef, maxLen = 22): string {
@@ -19,8 +20,8 @@ export default function SourceChip({
   /** Inline citation beside a section heading */
   compact?: boolean
 }) {
-  const doc = source.source.replace(/\.pdf$/i, '')
-  const label = source.label ?? doc
+  const doc = normalizeDocName(source.source)
+  const label = source.label ?? doc.replace(/_/g, ' ')
 
   return (
     <button

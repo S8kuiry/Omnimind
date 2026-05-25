@@ -299,8 +299,11 @@ def get_page_chunks(
     # Primary: prefix match on structured IDs
     prefix = f"{namespace}_{doc_name}_page{page}_"
     ids = []
-    for id_batch in index.list(prefix=prefix, namespace=namespace):
-        ids.extend(id_batch)
+    try:
+        for id_batch in index.list(prefix=prefix, namespace=namespace):
+            ids.extend(id_batch)
+    except Exception as exc:
+        print(f"[get_page_chunks] list prefix failed ({prefix}): {exc}")
 
     if ids:
         fetched = index.fetch(ids=ids, namespace=namespace)

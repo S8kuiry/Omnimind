@@ -1,3 +1,5 @@
+import { normalizeDocName } from './docName'
+
 const API = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8000'
 
 type UploadResult = {
@@ -121,9 +123,15 @@ export async function fetchDocumentPage(
   chatId: string,
   snippet?: string,
 ) {
+  const resolved = normalizeDocName(docName)
   const params = new URLSearchParams({ user_id: userId, chat_id: chatId })
   if (snippet) params.set('highlight', snippet)
-  const res = await fetch(`${API}/document/${encodeURIComponent(docName)}/page/${page}?${params}`)
-  if (!res.ok) throw new Error(await res.text())
+  const res = await fetch(
+    `${API}/document/${encodeURIComponent(resolved)}/page/${page}?${params}`,
+  )
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`${res.status}: ${detail || res.statusText}`)
+  }
   return res.json() as Promise<{ doc_name: string; page: number; text: string; highlight: string }>
 }

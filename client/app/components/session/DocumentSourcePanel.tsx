@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { fetchDocumentPage } from '@/lib/api'
+import { resolveDocName } from '@/lib/docName'
 import { findRelevantExcerpt } from '@/lib/sectionSources'
 import { X } from 'lucide-react'
 
@@ -12,7 +13,19 @@ interface Props {
   sectionContext?: string
   userId: string
   chatId: string
+  knownDocs?: string[]
   onClose: () => void
+}
+
+function formatLoadError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  if (raw.includes('404')) {
+    return 'No text found for this page. The citation may point to the wrong page, or the PDF was removed from this chat.'
+  }
+  if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+    return 'Could not reach the API server. Set NEXT_PUBLIC_BASE_URL on Vercel to your Render (or other) backend URL, then redeploy.'
+  }
+  return raw.length > 200 ? `${raw.slice(0, 200)}…` : raw || 'Unknown error'
 }
 
 export default function DocumentSourcePanel({
@@ -22,8 +35,10 @@ export default function DocumentSourcePanel({
   sectionContext,
   userId,
   chatId,
+  knownDocs = [],
   onClose,
 }: Props) {
+  const resolvedDoc = resolveDocName(docName, knownDocs)
   const [text, setText] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showFullPage, setShowFullPage] = useState(false)
@@ -36,16 +51,22 @@ export default function DocumentSourcePanel({
     setText(null)
     setShowFullPage(false)
 
-    fetchDocumentPage(docName, page, userId, chatId, snippet)
+    if (!chatId) {
+      setText('Chat session not ready yet.')
+      setLoading(false)
+      return
+    }
+
+    fetchDocumentPage(resolvedDoc, page, userId, chatId, snippet)
       .then(data => {
         const excerpt = contextForMatch
           ? findRelevantExcerpt(data.text, contextForMatch)
           : (snippet || data.text.slice(0, 520))
         setText(excerpt || data.text.slice(0, 520))
       })
-      .catch(() => setText('Failed to load page content.'))
+      .catch(err => setText(formatLoadError(err)))
       .finally(() => setLoading(false))
-  }, [docName, page, userId, chatId, snippet, sectionContext])
+  }, [resolvedDoc, page, userId, chatId, snippet, sectionContext])
 
   useEffect(() => {
     if (markRef.current) {
@@ -103,7 +124,9 @@ export default function DocumentSourcePanel({
     <div className="flex flex-col h-full w-full bg-white border-l border-gray-200">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-800 truncate">{docName}</p>
+          <p className="text-sm font-semibold text-gray-800 truncate" title={resolvedDoc}>
+            {docName}
+          </p>
           <p className="text-xs text-gray-400">Page {page}</p>
         </div>
         <button
@@ -121,8 +144,9 @@ export default function DocumentSourcePanel({
             onClick={() => {
               setShowFullPage(true)
               setLoading(true)
-              fetchDocumentPage(docName, page, userId, chatId, snippet)
+              fetchDocumentPage(resolvedDoc, page, userId, chatId, snippet)
                 .then(data => setText(data.text))
+                .catch(err => setText(formatLoadError(err)))
                 .finally(() => setLoading(false))
             }}
             className="mb-3 text-xs text-rose-600 hover:text-rose-700 underline"
