@@ -169,9 +169,7 @@ def list_user_documents(user_id: str) -> list[dict]:
     index = _get_index()
 
     # list() paginates all IDs in the namespace without a query vector
-    all_ids = []
-    for id_batch in index.list(namespace=user_id):
-        all_ids.extend(id_batch)
+    all_ids = _list_vector_ids(index, user_id)
 
     if not all_ids:
         return []
@@ -213,9 +211,7 @@ def delete_document(doc_name: str, user_id: str) -> int:
     # IDs are structured as {user_id}_{doc_name}_{chunk_id}
     # so we can prefix-match to find all chunks for this document
     prefix = f"{user_id}_{doc_name}_"
-    ids_to_delete = []
-    for id_batch in index.list(prefix=prefix, namespace=user_id):
-        ids_to_delete.extend(id_batch)
+    ids_to_delete = _list_vector_ids(index, user_id, prefix=prefix)
 
     if not ids_to_delete:
         return 0
@@ -246,9 +242,7 @@ def cleanup_expired_documents() -> dict:
 
     for namespace in namespaces:
         # paginate all IDs in this user's namespace
-        all_ids = []
-        for id_batch in index.list(namespace=namespace):
-            all_ids.extend(id_batch)
+        all_ids = _list_vector_ids(index, namespace)
 
         if not all_ids:
             continue
@@ -286,6 +280,19 @@ def cleanup_expired_documents() -> dict:
 _VEC_ID_TAIL = re.compile(r"_page(\d+)_chunk\d+$")
 
 
+def _normalize_vector_id(item) -> str:
+    """Pinecone list() returns str IDs on older SDKs and ListItem objects on newer ones."""
+    if isinstance(item, str):
+        return item
+    if hasattr(item, "id"):
+        vid = getattr(item, "id", None)
+        if vid is not None:
+            return str(vid)
+    if isinstance(item, dict) and item.get("id"):
+        return str(item["id"])
+    return str(item)
+
+
 def _list_vector_ids(index, namespace: str, prefix: str | None = None) -> list[str]:
     """List Pinecone IDs; prefix listing may be unavailable on some plans."""
     ids: list[str] = []
@@ -294,7 +301,8 @@ def _list_vector_ids(index, namespace: str, prefix: str | None = None) -> list[s
         if prefix:
             kwargs["prefix"] = prefix
         for id_batch in index.list(**kwargs):
-            ids.extend(id_batch)
+            for item in id_batch:
+                ids.append(_normalize_vector_id(item))
     except Exception as exc:
         print(f"[vector_store] list failed (prefix={prefix!r}, ns={namespace}): {exc}")
     return ids
