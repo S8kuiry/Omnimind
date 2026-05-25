@@ -1,4 +1,4 @@
-export type ChunkRef = { source: string; page: number; snippet: string }
+export type ChunkRef = { source: string; page: number; snippet: string; text?: string }
 
 export type SourceRef = {
   source: string
@@ -60,11 +60,15 @@ function overlapScore(a: string, b: string): number {
   return n / Math.sqrt(ta.size * tb.size)
 }
 
+function chunkProbeText(c: ChunkRef): string {
+  return (c.text || c.snippet || '').trim()
+}
+
 function scoreChunkForSection(heading: string, body: string, chunk: ChunkRef): number {
   const probe = `${heading} ${body}`
-  let score = overlapScore(probe, chunk.snippet)
+  let score = overlapScore(probe, chunkProbeText(chunk))
   const boosts = SECTION_KEYWORDS[normalizeHeading(heading)] ?? []
-  const lower = chunk.snippet.toLowerCase()
+  const lower = chunkProbeText(chunk).toLowerCase()
   for (const kw of boosts) {
     if (lower.includes(kw)) score += 0.12
   }
@@ -207,7 +211,7 @@ export function buildSectionSources(
     out.push({
       source: norm(c.source),
       page: c.page,
-      snippet: pickSnippetFromChunk(c.snippet, label, sec.body),
+      snippet: pickSnippetFromChunk(chunkProbeText(c), label, sec.body),
       sectionContext: sec.body.slice(0, 800),
       label,
     })
@@ -240,7 +244,7 @@ export function sectionSourcesFromHeadings(
     return {
       source: norm(best.source),
       page: best.page,
-      snippet: pickSnippetFromChunk(best.snippet, sec.heading!, sec.body),
+      snippet: pickSnippetFromChunk(chunkProbeText(best), sec.heading!, sec.body),
       sectionContext: sec.body.slice(0, 800),
       label: sec.heading!,
     }

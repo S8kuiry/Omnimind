@@ -74,28 +74,30 @@ def _prompt_qa(question: str, chunks: list[dict], doc_names: list[str] | None = 
     format_block = ""
     if _wants_full_resume_summary(question):
         format_block = """
-### FORMAT (full resume summary only):
-Use `## Overview`, `## Technical Skills`, `## Projects`, `## Experience`, `## Education` — but include ONLY items stated in the document. Skip empty sections. Do not add projects from outside the document.
+### FORMAT (full resume summary):
+Use `## Contact`, `## Education`, `## Experience`, `## Projects`, `## Technical Skills` — ONLY facts from the document. Skip empty sections.
+Each section = `## Heading` then `- **Label:** value` bullets (one per line). Projects get `- **Name** — summary` plus `- detail` sub-bullets.
 """
     else:
         format_block = """
-### FORMAT (targeted question — do NOT dump a full resume):
-- Answer only what was asked (e.g. if they ask about PDF in Projects, use `## Projects` or `## PDF in Projects` and stay on that topic).
-- Do NOT add Overview / Skills / Experience / Education unless the user asked for them.
-- One bullet per line. Bold **technologies** and **metrics** only if they appear in the context.
-- `> **Tip:**` only if you give brief advice grounded in the document.
+### FORMAT (targeted question):
+- Use `##` matching the topic asked only. Do NOT dump Contact/Education/Experience/Projects unless asked.
+- Bullets: `- **Label:** value` on separate lines. No broken `**` or `* *` markers.
 """
 
-    return f"""Answer the QUESTION using ONLY the DOCUMENT CONTEXT below. This rule applies to every model — no outside knowledge.
+    return f"""Answer using ONLY the DOCUMENT CONTEXT below.
 
-### GROUNDING (mandatory):
-1. The only source of truth is DOCUMENT CONTEXT. Never use training data or assumed portfolio projects.
-2. Never mention app/project names (Resume_Builder, Orbit, etc.) unless that exact name appears in the context text.
-3. If the answer is not in the context, say: "The uploaded document does not mention [topic]." Do not invent features or stacks.
-4. Segments with the same filename are ONE document — not "Document 1 / 2".
-5. Do NOT write `[Source: ...]` — citations are handled by the app.
+### GROUNDING:
+1. Document context is the only source of truth — no training data.
+2. Do not invent projects, stacks, or features not in the context.
+3. Segments with the same filename are ONE document.
+4. Do NOT write `[Source: ...]` — citations are added per section by the app.
 
-### INDEXED FILES IN THIS CHAT:
+### MARKDOWN (strict):
+- `##` per section; `- **Label:** value` bullets; never `**Label:***value` or glued lines like `151- **`.
+- Tech/stacks: comma-separated after one label bullet.
+
+### INDEXED FILES:
 {indexed}
 {format_block}
 

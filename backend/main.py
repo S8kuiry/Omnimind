@@ -28,6 +28,7 @@ from services.llm import (
     get_comparison, get_analytics, stream_answer
 )
 from services.conversation import is_conversational
+from services.citations import build_section_sources
 from config import TOP_K_RESULTS, GROQ_MODEL, ALLOWED_MODELS
 
 
@@ -189,6 +190,7 @@ async def stream(request: QueryRequest):
                     "source": c["source"],
                     "page": c["page"],
                     "snippet": c["text"][:200],
+                    "text": c["text"][:800],
                 }
                 for c in chunks
             ]
@@ -221,6 +223,10 @@ async def stream(request: QueryRequest):
 
         if sources:
             yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
+
+        section_sources = build_section_sources(full_response, chunks)
+        if section_sources:
+            yield f"data: [SECTION_SOURCES]{json.dumps(section_sources)}\n\n"
 
         yield "data: [DONE]\n\n"
 

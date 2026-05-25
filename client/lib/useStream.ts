@@ -210,20 +210,37 @@ export function useStream(
           if (token.startsWith('[CHUNKS]')) {
             try {
               const chunks = JSON.parse(token.slice(8)) as {
-                source: string; page: number; snippet: string
+                source: string; page: number; snippet: string; text?: string
               }[]
               hadRagChunks = true
               for (const c of chunks) {
                 const src = c.source.replace(/\.pdf$/i, '')
                 const key = `${src}-${c.page}`
-                snippetMapRef[key] = c.snippet
+                snippetMapRef[key] = c.text || c.snippet
                 chunksRef.push({
                   source: src,
                   page: c.page,
                   snippet: c.snippet,
+                  text: c.text,
                 })
               }
             } catch { /* ignore malformed payload */ }
+            continue
+          }
+
+          if (token.startsWith('[SECTION_SOURCES]')) {
+            try {
+              const parsed = JSON.parse(token.slice(17)) as SourceRef[]
+              if (parsed.length > 0) {
+                finalSources = parsed.map(s => ({
+                  source: s.source.replace(/\.pdf$/i, ''),
+                  page: s.page,
+                  snippet: s.snippet,
+                  label: s.label,
+                  sectionContext: s.sectionContext,
+                }))
+              }
+            } catch { /* ignore */ }
             continue
           }
 
@@ -290,22 +307,24 @@ export function useStream(
       )
 
       if (hadRagChunks && chunksRef.length > 0) {
-        let sectionSources = buildSectionSources(fullResponse, chunksRef)
-        if (!sectionSources.some(s => s.label)) {
-          sectionSources = sectionSourcesFromHeadings(fullResponse, chunksRef)
-        }
-        if (sectionSources.some(s => s.label)) {
-          finalSources = sectionSources
-        } else {
-          finalSources = mergeSourceLists(finalSources, sectionSources)
-          if (finalSources.length === 0) {
-            const seen = new Set<string>()
-            finalSources = chunksRef.filter(c => {
-              const k = `${c.source}-${c.page}`
-              if (seen.has(k)) return false
-              seen.add(k)
-              return true
-            })
+        if (!finalSources.some(s => s.label)) {
+          let sectionSources = buildSectionSources(fullResponse, chunksRef)
+          if (!sectionSources.some(s => s.label)) {
+            sectionSources = sectionSourcesFromHeadings(fullResponse, chunksRef)
+          }
+          if (sectionSources.some(s => s.label)) {
+            finalSources = sectionSources
+          } else {
+            finalSources = mergeSourceLists(finalSources, sectionSources)
+            if (finalSources.length === 0) {
+              const seen = new Set<string>()
+              finalSources = chunksRef.filter(c => {
+                const k = `${c.source}-${c.page}`
+                if (seen.has(k)) return false
+                seen.add(k)
+                return true
+              })
+            }
           }
         }
       }

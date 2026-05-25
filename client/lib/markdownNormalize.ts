@@ -713,6 +713,14 @@ export function repairSplitBoldMarkers(s: string): string {
 export function repairUniversalModelMarkdown(s: string): string {
   let t = s
 
+  // Phone/value glued to next bullet: "+917980647151- **"
+  t = t.replace(/(\+?\d[\d\s-]{7,}\d)\s*-\s*\*\*/g, '$1\n\n- **')
+  // Project line breaks: "Platform\n* *Custom" → bullet
+  t = t.replace(/\n\* \*([A-Za-z])/g, '\n- $1')
+  // **Stack:***React → **Stack:** React
+  t = t.replace(/\*\*Stack:\*\*\*([A-Za-z])/gi, '**Stack:** $1')
+  t = t.replace(/\*\*Stack:\*\*\s*\*\s*([^*\n]+)/gi, '**Stack:** $1')
+
   // * *bold** or * *Title – description → proper bold / list
   t = t.replace(/\* \*(?=\*)/g, '*')
   t = t.replace(/\* \*([^*\n]+?)\*\*/g, '**$1**')
