@@ -48,7 +48,13 @@ async function saveMessage(payload: object): Promise<SaveResult> {
   }
 }
 
-export function useStream(userId: string, chatId: string, initialMessages: Message[] = [], model: string = 'llama-3.1-8b-instant') {
+export function useStream(
+  userId: string,
+  chatId: string,
+  initialMessages: Message[] = [],
+  model: string = 'llama-3.1-8b-instant',
+  documentNames: string[] = [],
+) {
   console.log('chat-id : ', chatId)
   const [messages, setMessages] = useState<Message[]>(initialMessages) // 👈 accepts history
   const [isStreaming, setIsStreaming] = useState(false)
@@ -136,7 +142,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     try {
 
 
-      const response = await streamQuery(question, userId, chatId, history, model)
+      const response = await streamQuery(question, userId, chatId, history, model, documentNames)
       if (!response.ok) {
         const errBody = await response.text()
         throw new Error(errBody || `Chat request failed (${response.status})`)
@@ -340,7 +346,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
       setStreamingMessageId(null)
       setIsStreaming(false)
     }
-  }, [userId, chatId, messages, title, model])
+  }, [userId, chatId, messages, title, model, documentNames])
   return {
     messages,
     isStreaming,

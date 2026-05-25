@@ -18,6 +18,9 @@ from services.vector_store import (
     delete_document,
     cleanup_expired_documents,
     get_page_chunks,
+    resolve_doc_name,
+    list_doc_names_in_namespace,
+    retrieve_chunks_for_question,
 )
 from services.llm import (
      get_guidance,
@@ -60,8 +63,10 @@ class QueryRequest(BaseModel):
     user_id: str
     chat_id: str | None = None   # which chat session
     source_type: str = "pdf"
-    history: list[dict] = []  # ✅ add this
+    history: list[dict] = []
     model: str | None = None
+    has_documents: bool = False
+    document_names: list[str] = []
 
 
 def _resolve_model(model: str | None) -> str:
@@ -157,10 +162,19 @@ def upload_status(job_id: str):
 @app.post("/stream")
 async def stream(request: QueryRequest):
     scope = request.chat_id or request.user_id
+    doc_names = request.document_names or []
+    if request.has_documents and not doc_names:
+        doc_names = list_doc_names_in_namespace(scope)
+
     chunks: list[dict] = []
+    force_doc_mode = bool(doc_names) or request.has_documents
     if not is_conversational(request.question):
-        query_vec = embed_query(request.question)
-        chunks = query_chunks(query_vec, user_id=scope, top_k=8)
+        chunks = retrieve_chunks_for_question(
+            request.question,
+            scope,
+            doc_names=doc_names or None,
+            top_k=TOP_K_RESULTS,
+        )
 
     model = _resolve_model(request.model)
 
@@ -184,6 +198,8 @@ async def stream(request: QueryRequest):
             chunks,
             history=request.history or [],
             model=model,
+            doc_names=doc_names,
+            force_document_mode=force_doc_mode,
         ):
             full_response += token
             yield f"data: {token}\n\n"
@@ -217,12 +233,20 @@ async def get_document_page(
     highlight: str = "",
 ):
     scope = chat_id if chat_id else user_id
-    chunks = get_page_chunks(_normalize_doc_name(doc_name), page, scope)
+    norm = _normalize_doc_name(doc_name)
+    resolved = resolve_doc_name(norm, scope)
+    chunks = get_page_chunks(resolved, page, scope)
     if not chunks:
-        raise HTTPException(404, f"No content found for {doc_name} page {page}")
+        available = list_doc_names_in_namespace(scope)
+        raise HTTPException(
+            404,
+            f"No content found for {doc_name} page {page} in this chat. "
+            f"Indexed documents: {available or 'none — upload PDF in this chat'}",
+        )
+    actual_page = int(chunks[0]["page"])
     return {
-        "doc_name": doc_name,
-        "page": page,
+        "doc_name": resolved,
+        "page": actual_page,
         "text": "\n\n".join(c["text"] for c in chunks),
         "chunks": chunks,
         "highlight": highlight,
@@ -302,25 +326,7 @@ def delete_doc(doc_name: str, user_id: str, chat_id: str = ""):
 
 # fetching pdfs from pinecone
 @app.get("/documents/chat/{chat_id}")
-def get_chat_documents(chat_id:str):
+def get_chat_documents(chat_id: str):
     """Returns all doc names uploaded in this chat's namespace."""
-    from services.vector_store import _get_index
-    index = _get_index()
-    
-    all_ids = []
-    for id_batch in index.list(namespace=chat_id):
-        all_ids.extend(id_batch)
-    
-    if not all_ids:
-        return {"documents": []}
-    
-    # extract doc name from ID format: {chat_id}_{doc_name}_{chunk_id}
-    doc_names = set()
-    for vid in all_ids:
-        without_chat_id = '_'.join(vid.split('_')[1:])  # remove chat_id prefix
-        doc_name = re.sub(r'_page\d+_chunk\d+$', '', without_chat_id)  # remove _pageN_chunkN
-        if doc_name:
-            doc_names.add(doc_name)
-    
-    return {"documents": list(doc_names)}
+    return {"documents": list_doc_names_in_namespace(chat_id)}
 

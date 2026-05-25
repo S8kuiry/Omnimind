@@ -3,7 +3,7 @@ import { useParams } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { Message, useStream } from '@/lib/useStream'
-import { uploadPDF, getGuidance, getAnalytics, compareDocuments, deleteDocument } from '@/lib/api'
+import { uploadPDF, getGuidance, getAnalytics, compareDocuments, deleteDocument, getApiBase } from '@/lib/api'
 import TabBar from '@/app/components/session/TabBar'
 import ChatPanel from '@/app/components/session/ChatPanel'
 import DocumentSourcePanel from '@/app/components/session/DocumentSourcePanel'
@@ -60,7 +60,7 @@ export default function ChatPage() {
     injectUserMessage,
     saveWarning,
     dismissSaveWarning,
-  } = useStream(userId, chatId, [], model)
+  } = useStream(userId, chatId, [], model, docNames)
   console.log("userId", userId)
 
   const handleRemove = async (name: string) => {
@@ -151,7 +151,7 @@ export default function ChatPage() {
     if (!chatId) return
 
     const versionAtFetch = docsFetchVersion.current
-    fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
+    fetch(`${getApiBase()}/documents/chat/${chatId}`)
       .then(r => r.json())
       .then(data => {
         if (docsFetchVersion.current !== versionAtFetch) return

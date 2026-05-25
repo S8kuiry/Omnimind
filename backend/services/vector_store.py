@@ -1,4 +1,5 @@
 # vector_store.py — Pinecone backend, full drop-in replacement
+import re
 import time
 import os
 from pinecone import Pinecone, ServerlessSpec
@@ -282,6 +283,104 @@ def cleanup_expired_documents() -> dict:
 
 # ── Page chunk helpers (for PDF citations) ─────────────────────────
 
+_VEC_ID_TAIL = re.compile(r"_page(\d+)_chunk\d+$")
+
+
+def _list_vector_ids(index, namespace: str, prefix: str | None = None) -> list[str]:
+    """List Pinecone IDs; prefix listing may be unavailable on some plans."""
+    ids: list[str] = []
+    try:
+        kwargs = {"namespace": namespace}
+        if prefix:
+            kwargs["prefix"] = prefix
+        for id_batch in index.list(**kwargs):
+            ids.extend(id_batch)
+    except Exception as exc:
+        print(f"[vector_store] list failed (prefix={prefix!r}, ns={namespace}): {exc}")
+    return ids
+
+
+def _doc_name_from_vector_id(namespace: str, vector_id: str) -> str | None:
+    """Parse doc name from {namespace}_{doc}_page{N}_chunk{M}."""
+    prefix = f"{namespace}_"
+    if not vector_id.startswith(prefix):
+        return None
+    tail = vector_id[len(prefix) :]
+    m = _VEC_ID_TAIL.search(tail)
+    if not m:
+        return None
+    return tail[: m.start()]
+
+
+def list_doc_names_in_namespace(namespace: str) -> list[str]:
+    """All document source names stored under a chat/user namespace."""
+    index = _get_index()
+    ids = _list_vector_ids(index, namespace, prefix=f"{namespace}_")
+    if not ids:
+        ids = _list_vector_ids(index, namespace)
+
+    names: set[str] = set()
+    for vid in ids:
+        doc = _doc_name_from_vector_id(namespace, vid)
+        if doc:
+            names.add(doc)
+    return sorted(names)
+
+
+def resolve_doc_name(requested: str, namespace: str) -> str:
+    """Map LLM/citation doc labels to the name used at upload time in Pinecone."""
+    docs = list_doc_names_in_namespace(namespace)
+    if not docs:
+        return requested
+
+    if requested in docs:
+        return requested
+
+    lower = requested.lower()
+    for d in docs:
+        if d.lower() == lower:
+            return d
+
+    for d in docs:
+        dl, rl = d.lower(), lower
+        if rl in dl or dl in rl:
+            return d
+
+    return requested
+
+
+def _fetch_chunks_by_ids(
+    index,
+    ids: list[str],
+    namespace: str,
+    *,
+    page: int | None = None,
+    source: str | None = None,
+) -> list[dict]:
+    chunks: list[dict] = []
+    for i in range(0, len(ids), 100):
+        batch = ids[i : i + 100]
+        if not batch:
+            continue
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        for vec_id, vec_data in fetched.vectors.items():
+            meta = vec_data.metadata
+            meta_page = int(meta.get("page", -1))
+            meta_source = meta.get("source", "")
+            if page is not None and meta_page != page:
+                continue
+            if source is not None and meta_source != source:
+                continue
+            chunks.append({
+                "chunk_id": vec_id,
+                "text": meta["text"],
+                "page": meta_page,
+                "source": meta_source,
+            })
+    chunks.sort(key=lambda c: c["chunk_id"])
+    return chunks
+
+
 def get_page_chunks(
     doc_name: str,
     page: int,
@@ -289,59 +388,108 @@ def get_page_chunks(
 ) -> list[dict]:
     """
     Returns all chunks for a specific page of a document.
-    
-    Strategy: prefix-list with {namespace}_{doc_name}_page{page}_
-    to match the existing ID format, then fetch metadata.
-    Falls back to a metadata filter query if no prefix hits.
+
+    Stream/RAG uses semantic query; this uses ID listing + metadata so
+    citations still resolve when dummy-vector metadata queries miss.
     """
     index = _get_index()
+    resolved = resolve_doc_name(doc_name, namespace)
 
-    # Primary: prefix match on structured IDs
-    prefix = f"{namespace}_{doc_name}_page{page}_"
-    ids = []
-    try:
-        for id_batch in index.list(prefix=prefix, namespace=namespace):
-            ids.extend(id_batch)
-    except Exception as exc:
-        print(f"[get_page_chunks] list prefix failed ({prefix}): {exc}")
-
-    if ids:
-        fetched = index.fetch(ids=ids, namespace=namespace)
-        chunks = []
-        for vec_id, vec_data in fetched.vectors.items():
-            meta = vec_data.metadata
-            chunks.append({
-                "chunk_id": vec_id,
-                "text": meta["text"],
-                "page": meta["page"],
-                "source": meta["source"],
-            })
-        chunks.sort(key=lambda c: c["chunk_id"])
+    # 1) Page-specific ID prefix
+    page_prefix = f"{namespace}_{resolved}_page{page}_"
+    ids = _list_vector_ids(index, namespace, prefix=page_prefix)
+    chunks = _fetch_chunks_by_ids(index, ids, namespace)
+    if chunks:
         return chunks
 
-    # Fallback: metadata filter query (zero-vector, broader sweep)
-    results = index.query(
-        vector=[0.0] * EMBEDDING_DIMENSION,
-        top_k=20,
-        namespace=namespace,
-        filter={
-            "source": {"$eq": doc_name},
-            "page":   {"$eq": page},
-        },
-        include_metadata=True,
-    )
+    # 2) All vectors for this doc in the namespace, filter by metadata page
+    doc_prefix = f"{namespace}_{resolved}_"
+    ids = _list_vector_ids(index, namespace, prefix=doc_prefix)
+    chunks = _fetch_chunks_by_ids(index, ids, namespace, page=page, source=resolved)
+    if chunks:
+        return chunks
 
-    chunks = []
-    for match in results.matches:
-        meta = match.metadata
-        chunks.append({
-            "chunk_id": match.id,
-            "text": meta["text"],
-            "page": meta["page"],
-            "source": meta["source"],
-        })
-    chunks.sort(key=lambda c: c["chunk_id"])
-    return chunks
+    # 3) Citation page may be wrong — return nearest page that has chunks
+    all_doc = _fetch_chunks_by_ids(index, ids, namespace, source=resolved)
+    if all_doc:
+        pages = sorted({int(c["page"]) for c in all_doc if c["page"] > 0})
+        if pages:
+            nearest = min(pages, key=lambda p: abs(p - page))
+            return [c for c in all_doc if int(c["page"]) == nearest]
+
+    # 4) Metadata filter query (last resort)
+    try:
+        results = index.query(
+            vector=[0.0] * EMBEDDING_DIMENSION,
+            top_k=100,
+            namespace=namespace,
+            filter={
+                "source": {"$eq": resolved},
+                "page": {"$eq": page},
+            },
+            include_metadata=True,
+        )
+        chunks = []
+        for match in results.matches:
+            meta = match.metadata
+            chunks.append({
+                "chunk_id": match.id,
+                "text": meta["text"],
+                "page": int(meta.get("page", page)),
+                "source": meta.get("source", resolved),
+            })
+        chunks.sort(key=lambda c: c["chunk_id"])
+        if chunks:
+            return chunks
+    except Exception as exc:
+        print(f"[get_page_chunks] metadata query failed: {exc}")
+
+    return []
+
+
+def retrieve_chunks_for_question(
+    question: str,
+    namespace: str,
+    doc_names: list[str] | None = None,
+    top_k: int = 8,
+) -> list[dict]:
+    """
+    Semantic retrieval with fallbacks so all models get document context
+    even when the user's wording doesn't match chunk embeddings well.
+    """
+    from services.embedder import embed_query
+
+    names = doc_names or list_doc_names_in_namespace(namespace)
+    query_vec = embed_query(question)
+    chunks = query_chunks(query_vec, user_id=namespace, top_k=top_k)
+    if chunks:
+        return chunks
+
+    if not names:
+        return []
+
+    probes = [
+        question,
+        f"{question} — projects experience skills pdf",
+        "projects experience education technical skills",
+    ]
+    seen: set[tuple] = set()
+    merged: list[dict] = []
+    for probe in probes:
+        qv = embed_query(probe)
+        for c in query_chunks(qv, user_id=namespace, top_k=top_k):
+            key = (c.get("source"), c.get("page"), (c.get("text") or "")[:96])
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(c)
+            if len(merged) >= top_k:
+                return merged
+
+    index = _get_index()
+    doc = resolve_doc_name(names[0], namespace)
+    ids = _list_vector_ids(index, namespace, prefix=f"{namespace}_{doc}_")
+    return _fetch_chunks_by_ids(index, ids[: top_k * 3], namespace)[:top_k]
 
 
 def get_page_text(doc_name: str, page: int, namespace: str) -> str:

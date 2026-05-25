@@ -1,6 +1,11 @@
 import { normalizeDocName } from './docName'
 
-const API = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8000'
+/** Backend base URL — must be set on Vercel at build time (`NEXT_PUBLIC_*`). */
+export function getApiBase(): string {
+  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8000'
+}
+
+const API = getApiBase()
 
 type UploadResult = {
   doc_name: string
@@ -108,11 +113,20 @@ export function streamQuery(
   chatId: string,
   history: { role: string; content: string }[] = [],
   model?: string,
+  documentNames: string[] = [],
 ): Promise<Response> {
   return fetch(`${API}/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, user_id: userId, chat_id: chatId, history, model }),
+    body: JSON.stringify({
+      question,
+      user_id: userId,
+      chat_id: chatId,
+      history,
+      model,
+      has_documents: documentNames.length > 0,
+      document_names: documentNames,
+    }),
   })
 }
 

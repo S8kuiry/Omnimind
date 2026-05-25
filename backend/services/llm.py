@@ -46,27 +46,58 @@ def _build_context(chunks: list[dict]) -> str:
 
 # ### STRUCTURED ANALYSIS: """
 
-def _prompt_qa(question: str, chunks: list[dict]) -> str:
+def _wants_full_resume_summary(question: str) -> bool:
+    """Only use the full resume outline when the user asked for a broad profile summary."""
+    q = question.lower()
+    triggers = (
+        "full resume",
+        "entire resume",
+        "whole cv",
+        "summarize my resume",
+        "summarize the resume",
+        "resume summary",
+        "overview of my resume",
+        "profile summary",
+        "break down my resume",
+        "structure my resume",
+    )
+    if any(t in q for t in triggers):
+        return True
+    if "resume" in q and any(w in q for w in ("summarize", "summary", "overview", "review all")):
+        return len(q) > 40
+    return False
+
+
+def _prompt_qa(question: str, chunks: list[dict], doc_names: list[str] | None = None) -> str:
     context = _build_context(chunks)
-    return f"""You are an expert document analyst. Answer using ONLY the document context below, with clear, modern markdown — like Claude or Notion, not a plain essay.
+    indexed = ", ".join(doc_names) if doc_names else "see segments below"
+    format_block = ""
+    if _wants_full_resume_summary(question):
+        format_block = """
+### FORMAT (full resume summary only):
+Use `## Overview`, `## Technical Skills`, `## Projects`, `## Experience`, `## Education` — but include ONLY items stated in the document. Skip empty sections. Do not add projects from outside the document.
+"""
+    else:
+        format_block = """
+### FORMAT (targeted question — do NOT dump a full resume):
+- Answer only what was asked (e.g. if they ask about PDF in Projects, use `## Projects` or `## PDF in Projects` and stay on that topic).
+- Do NOT add Overview / Skills / Experience / Education unless the user asked for them.
+- One bullet per line. Bold **technologies** and **metrics** only if they appear in the context.
+- `> **Tip:**` only if you give brief advice grounded in the document.
+"""
 
-### CONTENT RULES:
-1. **One document per filename.** Segments from the same file are one doc — never label them "Document 1 / 2".
-2. **Citations** are added automatically by the app — do NOT write `[Source: ...]` in the answer text.
-3. If something is not in the documents, say so briefly — do not invent facts.
-4. **No filler openings** — never start with "Based on the provided document context" or "It seems you're…". Start with a useful one-line takeaway, then structure.
+    return f"""Answer the QUESTION using ONLY the DOCUMENT CONTEXT below. This rule applies to every model — no outside knowledge.
 
-### FORMATTING (required — broken markdown will break the UI):
-- **Resume / profile questions:** Use exactly these `##` sections in order: `## Overview`, `## Technical Skills`, `## Projects`, `## Experience`, `## Education`. Put skills in ONE `## Technical Skills` section with grouped `- **Category:** item, item` bullets (max 5 groups). Do NOT create a separate `###` per skill.
-- **Other questions:** `##` main sections + `###` subsections only when the answer has 3+ distinct parts.
-- **Lists:** One item per line: `- **Label:** short detail` (under 15 words per bullet). NEVER inline `* item * item` on one line.
-- **Paragraphs:** Max 2 sentences; blank line between sections.
-- **Emphasis:** Bold **technologies**, **roles**, **companies**, and **metrics**.
-- **Tips:** When giving advice, use a blockquote: `> **Tip:** …`
-- **Links:** If the document contains URLs, use `[label](url)`. Do not invent links.
-- **Dividers:** Use `---` between major sections on long answers (resume summaries, guides).
-- **No HTML** (<br>, <ul>). No XML/thinking tags. No single giant paragraph for a full resume review.
-- For how-tos: numbered steps with `###` per step, not walls of text.
+### GROUNDING (mandatory):
+1. The only source of truth is DOCUMENT CONTEXT. Never use training data or assumed portfolio projects.
+2. Never mention app/project names (Resume_Builder, Orbit, etc.) unless that exact name appears in the context text.
+3. If the answer is not in the context, say: "The uploaded document does not mention [topic]." Do not invent features or stacks.
+4. Segments with the same filename are ONE document — not "Document 1 / 2".
+5. Do NOT write `[Source: ...]` — citations are handled by the app.
+
+### INDEXED FILES IN THIS CHAT:
+{indexed}
+{format_block}
 
 ### DOCUMENT CONTEXT:
 {context}
@@ -74,7 +105,7 @@ def _prompt_qa(question: str, chunks: list[dict]) -> str:
 ### QUESTION:
 {question}
 
-### ANSWER (markdown, structured):"""
+### ANSWER:"""
 
 
 def _prompt_guidance(chunks: list[dict]) -> str:
@@ -207,8 +238,16 @@ def get_analytics(chunks: list[dict]) -> str:
 
 
 
-def stream_answer(question: str, chunks: list[dict], history: list[dict] = [], model: str = GROQ_MODEL):
-    conversational = is_conversational(question)
+def stream_answer(
+    question: str,
+    chunks: list[dict],
+    history: list[dict] = [],
+    model: str = GROQ_MODEL,
+    *,
+    doc_names: list[str] | None = None,
+    force_document_mode: bool = False,
+):
+    conversational = is_conversational(question) and not force_document_mode
     trimmed = trim_history(history, max_messages=8, max_chars=600)
 
     # Social turns: chat mode — no document dump, minimal history
@@ -218,12 +257,26 @@ def stream_answer(question: str, chunks: list[dict], history: list[dict] = [], m
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": question})
         temperature = 0.6
-    elif chunks:
-        messages = [{"role": "system", "content": DOC_SYSTEM}]
+    elif chunks or force_document_mode:
+        system = DOC_SYSTEM
+        if doc_names:
+            system += f"\n\nActive uploaded files: {', '.join(doc_names)}."
+        if force_document_mode and not chunks:
+            system += (
+                "\n\nNo text segments were retrieved, but the user has files in this chat. "
+                "Tell them you cannot read the document right now and ask them to re-upload — "
+                "do not answer from general knowledge."
+            )
+        messages = [{"role": "system", "content": system}]
         for msg in trimmed:
             messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": _prompt_qa(question, chunks)})
-        temperature = 0.15
+        user_content = (
+            _prompt_qa(question, chunks, doc_names)
+            if chunks
+            else f"QUESTION: {question}\n\n(No document segments retrieved.)"
+        )
+        messages.append({"role": "user", "content": user_content})
+        temperature = 0.1
     else:
         messages = [{"role": "system", "content": CHAT_SYSTEM}]
         for msg in trimmed:
