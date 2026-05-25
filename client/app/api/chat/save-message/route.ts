@@ -22,6 +22,7 @@ export async function POST(req: Request) {
         await dbConnect()
 
         // upsert chat — creates on first message, updates title/pdf info after
+        // title must not appear in both $set and $setOnInsert (MongoDB code 40 conflict)
         await Chat.findOneAndUpdate(
             { chatId },
             {
@@ -35,10 +36,10 @@ export async function POST(req: Request) {
                 },
                 $setOnInsert: {
                     chatId,
-                    title: title || 'New Chat',
+                    ...(!title && { title: 'New Chat' }),
                 },
             },
-            { upsert: true, new: true }
+            { upsert: true, returnDocument: 'after' }
         )
 
         // save the message with its metadata
@@ -48,13 +49,17 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('[save-message]', error)
-        const msg =
-            error instanceof Error &&
-            (error.name === 'MongooseServerSelectionError' ||
-                error.message.includes('Mongo') ||
-                error.message.includes('whitelist'))
-                ? 'Database unavailable — add your IP in MongoDB Atlas Network Access'
-                : 'Server error'
+        const err = error as Error & { codeName?: string }
+        const isConnection =
+            err.name === 'MongooseServerSelectionError' ||
+            err.message?.includes('whitelist') ||
+            err.message?.includes('ECONNREFUSED') ||
+            err.message?.includes('ENOTFOUND')
+        const msg = isConnection
+            ? 'Database unavailable — check MongoDB Atlas connection and Network Access'
+            : err.codeName === 'ConflictingUpdateOperators'
+              ? 'Could not save chat metadata'
+              : 'Server error'
         return NextResponse.json({ error: msg }, { status: 500 })
     }
 }

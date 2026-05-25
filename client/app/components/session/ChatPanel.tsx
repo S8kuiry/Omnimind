@@ -34,7 +34,6 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
     { id: "qwen/qwen3-32b", name: "Qwen 3 32B (Smart & High Volume - 14.4k Req/day)" },
     { id: "allam-2-7b", name: "ALLAM 2 7B (Arabic Specialized - 7k Req/day)" },
     { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B (Max Reasoning - 1k Req/day)" },
-    { id: "meta-llama/llama-4-scout-17b-16e-instruct", name: "State-of-the-Art Mixture of Experts (Massive context extraction & logic)" }
 
   ];
 
@@ -112,7 +111,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
           <span>
             <strong className="font-medium">History not saved.</strong>{' '}
             {saveWarning}
-            {' '}Chat still works — fix MongoDB Atlas → Network Access → add your current IP (or{' '}
+            {' '}Chat still works — Network Access Issue{' '}
             <code className="text-[10px] opacity-90"></code>
           </span>
           {onDismissSaveWarning && (
