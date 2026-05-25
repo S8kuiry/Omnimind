@@ -1,11 +1,12 @@
 'use client'
 import { useParams } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { Message, useStream } from '@/lib/useStream'
-import { uploadPDF, getGuidance, getAnalytics, deleteDocument } from '@/lib/api'
+import { uploadPDF, getGuidance, getAnalytics, compareDocuments, deleteDocument } from '@/lib/api'
 import TabBar from '@/app/components/session/TabBar'
 import ChatPanel from '@/app/components/session/ChatPanel'
+import DocumentSourcePanel from '@/app/components/session/DocumentSourcePanel'
 
 type Tab = 'chat' | 'guidance' | 'analytics' | 'compare'
 
@@ -23,10 +24,19 @@ export default function ChatPage() {
   const [docName, setDocName] = useState<string | null>(null)
   const [docNames, setDocNames] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null)
+  const [removingDoc, setRemovingDoc] = useState(false)
   const [guidanceData, setGuidanceData] = useState<any>(null)
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [model, setModelState] = useState<string>(DEFAULT_MODEL)
+  const [sourcePanel, setSourcePanel] = useState<{
+    docName: string
+    page: number
+    snippet?: string
+    sectionContext?: string
+  } | null>(null)
+  const docsFetchVersion = useRef(0)
 
   useEffect(() => {
     if (!chatId) return
@@ -39,24 +49,42 @@ export default function ChatPage() {
     if (chatId) sessionStorage.setItem(modelStorageKey(chatId), m)
   }
 
-  const { messages, isStreaming, streamingMessageId, send, loadHistory, injectLoading, updateMessage, injectUserMessage } = useStream(userId, chatId, [], model)
+  const {
+    messages,
+    isStreaming,
+    streamingMessageId,
+    send,
+    loadHistory,
+    injectLoading,
+    updateMessage,
+    injectUserMessage,
+    saveWarning,
+    dismissSaveWarning,
+  } = useStream(userId, chatId, [], model)
   console.log("userId", userId)
 
-  // remving the uploaded pdf 
   const handleRemove = async (name: string) => {
-    // ✅ remove from UI instantly
-    setDocNames(prev => prev.filter(d => d !== name))
+    if (removingDoc || uploading) return
+    setRemovingDoc(true)
+    docsFetchVersion.current++
+    let nextNames: string[] = []
+    setDocNames(prev => {
+      nextNames = prev.filter(d => d !== name)
+      return nextNames
+    })
 
     try {
       await deleteDocument(name, userId, chatId)
       await fetch(`/api/chat/${chatId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: { pdfNames: docNames.filter(d => d !== name) } })
+        body: JSON.stringify({ metadata: { pdfNames: nextNames } })
       })
     } catch {
-      // rollback if it fails
+      docsFetchVersion.current++
       setDocNames(prev => [...prev, name])
+    } finally {
+      setRemovingDoc(false)
     }
   }
 
@@ -92,36 +120,45 @@ export default function ChatPage() {
 
 
   const handleUpload = async (file: File) => {
+    if (uploading || removingDoc || !userId || !chatId) return
     setUploading(true)
+    setUploadStatus('Uploading…')
+    docsFetchVersion.current++
     try {
-      const res = await uploadPDF(file, userId, chatId)
-      const updatedNames = [...docNames, res.doc_name]
-      setDocNames(updatedNames)
-      setDocName(res.doc_name)
-
-      await fetch(`/api/chat/${chatId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: { pdfNames: updatedNames } })
+      const res = await uploadPDF(file, userId, chatId, setUploadStatus)
+      setDocNames(prev => {
+        if (prev.includes(res.doc_name)) return prev
+        const next = [...prev, res.doc_name]
+        void fetch(`/api/chat/${chatId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metadata: { pdfNames: next } }),
+        })
+        return next
       })
+      setDocName(res.doc_name)
+    } catch (err) {
+      console.error('Upload failed:', err)
+      setUploadStatus('Upload failed')
     } finally {
       setUploading(false)
+      setTimeout(() => setUploadStatus(null), 4000)
     }
   }
 
 
-  {/*fecthing doc names  */ }
   useEffect(() => {
-    if (!chatId) return  // ✅ remove historyLoaded dependency
+    if (!chatId) return
 
+    const versionAtFetch = docsFetchVersion.current
     fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/documents/chat/${chatId}`)
       .then(r => r.json())
       .then(data => {
-        if (data.documents?.length > 0) {
-          setDocNames(data.documents)
-        }
+        if (docsFetchVersion.current !== versionAtFetch) return
+        setDocNames(data.documents ?? [])
       })
-  }, [chatId])  // ✅ only depends on chatId
+      .catch(() => {})
+  }, [chatId])
 
 
   {/** feature handle  */ }
@@ -174,11 +211,17 @@ injectUserMessage(labelMap[type])
       assistantContent = `**📊 Analytics**\n\n${JSON.stringify(data.analytics, null, 2)}`
       updateMessage(loadingId, assistantContent)
     }
-    // if (type === 'compare') {
-    //   const data = await compareDocuments(docNames, userId, chatId)
-    //   assistantContent = `**⚖️ Compare**\n\n${JSON.stringify(data.compare, null, 2)}`
-    //   updateMessage(loadingId, assistantContent)
-    // }
+    if (type === 'compare' && docNames.length >= 2) {
+      const data = await compareDocuments(
+        'Compare these two documents and highlight key similarities and differences.',
+        userId,
+        chatId,
+        docNames[0],
+        docNames[1],
+      )
+      assistantContent = `**⚖️ Compare**\n\n${data.comparison}`
+      updateMessage(loadingId, assistantContent)
+    }
 
     // ✅ persist assistant reply so it survives reload
     if (assistantContent) {
@@ -225,8 +268,14 @@ injectUserMessage(labelMap[type])
   )
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col h-screen" style={{ background: '#0e0f10' }}>
-      <div className="flex-1 overflow-hidden px-40">
+    <div
+      className={`flex-1 overflow-hidden flex h-screen  ${sourcePanel ? 'flex-row' : 'flex-col '} items-center justify-center` }
+      style={{ background: '#0e0f10' }}
+    >
+      <div
+        className={`flex flex-col min-w-0 h-full  ${sourcePanel ? 'w-[58%] shrink-0' : 'w-[75%]'}`}
+        style={{ transition: 'width 0.2s' }}
+      >
         {activeTab === 'chat' && (
           <ChatPanel
             messages={messages}
@@ -234,15 +283,35 @@ injectUserMessage(labelMap[type])
             streamingMessageId={streamingMessageId}
             onSend={send}
             onUpload={handleUpload}
-            uploading={uploading}
+            uploading={uploading || removingDoc}
+            uploadStatus={uploadStatus}
             hasDocs={docNames}
             onRemove={handleRemove}
             onFeature={handleFeature}
             model={model}
             setModel={setModel}
+            onOpenSource={(docName, page, snippet, sectionContext) =>
+              setSourcePanel({ docName, page, snippet, sectionContext })
+            }
+            saveWarning={saveWarning}
+            onDismissSaveWarning={dismissSaveWarning}
           />
         )}
       </div>
+
+      {sourcePanel && (
+        <div className="w-[42%] h-full shrink-0 min-w-0">
+          <DocumentSourcePanel
+            docName={sourcePanel.docName}
+            page={sourcePanel.page}
+            snippet={sourcePanel.snippet}
+            sectionContext={sourcePanel.sectionContext}
+            userId={userId}
+            chatId={chatId}
+            onClose={() => setSourcePanel(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }

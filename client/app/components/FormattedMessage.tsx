@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { Copy, Check, Download } from 'lucide-react'
 import { useState } from 'react'
 import { normalizeMarkdown } from '@/lib/markdownNormalize'
+import { ensureSectionSources, type SourceRef } from '@/lib/sectionSources'
 import MarkdownBody from './MarkdownBody'
 
 // ─── Thinking dots ────────────────────────────────────────────────────────────
@@ -107,14 +108,26 @@ export default function FormattedMessage({
   content,
   isLoading = false,
   isStreaming = false,
+  sources,
+  onOpenSource,
+  defaultDoc,
 }: {
   content: string
   isLoading?: boolean
   isStreaming?: boolean
+  sources?: SourceRef[]
+  onOpenSource?: (docName: string, page: number, snippet?: string, sectionContext?: string) => void
+  /** Attached PDF name — used to synthesize per-section citations when metadata has none */
+  defaultDoc?: string
 }) {
   const normalized = useMemo(
     () => normalizeMarkdown(content, { forStream: isStreaming }),
     [content, isStreaming]
+  )
+
+  const displaySources = useMemo(
+    () => ensureSectionSources(normalized, sources, defaultDoc),
+    [normalized, sources, defaultDoc],
   )
 
   if (isLoading) return <ThinkingDots />
@@ -127,6 +140,8 @@ export default function FormattedMessage({
         showCaret={isStreaming && content.length > 0}
         CopyButton={CopyButton}
         DownloadButton={DownloadButton}
+        sources={displaySources}
+        onOpenSource={onOpenSource}
       />
       {!isStreaming && content.length > 0 && (
         <MessageActions content={normalized} />

@@ -27,8 +27,12 @@ ALLOWED_MODELS = {
     "qwen/qwen3-32b",
     "allam-2-7b",
     "openai/gpt-oss-120b",
+    # 2. State-of-the-Art Mixture of Experts (Massive context extraction & logic)
+    "meta-llama/llama-4-scout-17b-16e-instruct",
 }
 
-CHUNK_SIZE         = 500
-CHUNK_OVERLAP      = 50
+CHUNK_SIZE         = int(os.getenv("CHUNK_SIZE", "1000"))
+CHUNK_OVERLAP      = int(os.getenv("CHUNK_OVERLAP", "100"))
 TOP_K_RESULTS      = 8
+# Must match your Pinecone index (Gemini default = 3072). Use 768 only with a 768-dim index + local embeddings.
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "3072"))

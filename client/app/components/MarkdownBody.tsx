@@ -7,6 +7,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Terminal } from 'lucide-react'
 import type { Components } from 'react-markdown'
+import SourceChip from '@/app/components/session/SourceChip'
+import { citationMapFromSources, normalizeHeading, type SourceRef } from '@/lib/sectionSources'
 
 const BODY_STYLE = {
   color: 'rgba(255,255,255,0.86)',
@@ -40,11 +42,49 @@ function isEmptyTipBlockquote(children: ReactNode): boolean {
 export function buildMarkdownComponents(
   streamMode: boolean,
   CopyButton: React.ComponentType<{ text: string; size?: 'xs' | 'sm' }>,
-  DownloadButton: React.ComponentType<{ text: string; filename: string }>
+  DownloadButton: React.ComponentType<{ text: string; filename: string }>,
+  citationByHeading?: Map<string, SourceRef>,
+  onOpenSource?: (docName: string, page: number, snippet?: string, sectionContext?: string) => void,
 ): Components {
   const headingClass = streamMode
     ? 'text-[15px] font-medium tracking-normal mt-5 mb-2'
     : undefined
+
+  const citeForHeading = (children: ReactNode) => {
+    if (!citationByHeading?.size) return null
+    const title = nodeText(children).trim()
+    return citationByHeading.get(normalizeHeading(title)) ?? null
+  }
+
+  const headingWithCitation = (
+    level: 'h2' | 'h3',
+    children: ReactNode,
+    className: string | undefined,
+    style: React.CSSProperties,
+  ) => {
+    const cite = citeForHeading(children)
+    const Tag = level
+    const defaultClass =
+      level === 'h2'
+        ? 'text-[17px] font-semibold tracking-tight mt-8 mb-3 pb-2 border-b border-[rgba(210,140,160,0.15)]'
+        : 'text-[15px] font-semibold mt-5 mb-2'
+    const heading = (
+      <Tag className={className ?? defaultClass} style={style}>
+        {children}
+      </Tag>
+    )
+    if (!cite) return heading
+    return (
+      <div
+        className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1 ${
+          level === 'h2' ? 'mt-8 mb-3 pb-2 border-b border-[rgba(210,140,160,0.15)]' : 'mt-5 mb-2'
+        }`}
+      >
+        <div className="flex-1 min-w-0">{heading}</div>
+        <SourceChip source={cite} onOpen={onOpenSource} compact />
+      </div>
+    )
+  }
 
   return {
     code({ inline, className, children, ...props }: any) {
@@ -137,25 +177,20 @@ export function buildMarkdownComponents(
         {children}
       </h1>
     ),
-    h2: ({ children }) => (
-      <h2
-        className={
-          headingClass ??
-          'text-[17px] font-semibold tracking-tight mt-8 mb-3 pb-2 border-b border-[rgba(210,140,160,0.15)]'
-        }
-        style={{ color: 'rgba(255,255,255,0.94)' }}
-      >
-        {children}
-      </h2>
-    ),
-    h3: ({ children }) => (
-      <h3
-        className={headingClass ?? 'text-[15px] font-semibold mt-5 mb-2'}
-        style={{ color: streamMode ? TEXT : 'rgba(232,182,196,0.95)' }}
-      >
-        {children}
-      </h3>
-    ),
+    h2: ({ children }) =>
+      headingWithCitation(
+        'h2',
+        children,
+        headingClass ?? 'text-[17px] font-semibold tracking-tight',
+        { color: 'rgba(255,255,255,0.94)' },
+      ),
+    h3: ({ children }) =>
+      headingWithCitation(
+        'h3',
+        children,
+        headingClass ?? 'text-[15px] font-semibold',
+        { color: streamMode ? TEXT : 'rgba(232,182,196,0.95)' },
+      ),
     h4: ({ children }) => (
       <h4
         className={headingClass ?? 'text-[13px] font-semibold mt-4 mb-1.5'}
@@ -289,18 +324,30 @@ export default function MarkdownBody({
   showCaret = false,
   CopyButton,
   DownloadButton,
+  sources,
+  onOpenSource,
 }: {
   markdown: string
   streamMode?: boolean
   showCaret?: boolean
   CopyButton: React.ComponentType<{ text: string; size?: 'xs' | 'sm' }>
   DownloadButton: React.ComponentType<{ text: string; filename: string }>
+  sources?: SourceRef[]
+  onOpenSource?: (docName: string, page: number, snippet?: string, sectionContext?: string) => void
 }) {
-  const components = buildMarkdownComponents(streamMode, CopyButton, DownloadButton)
+  const citationByHeading = streamMode ? undefined : citationMapFromSources(sources)
+
+  const components = buildMarkdownComponents(
+    streamMode,
+    CopyButton,
+    DownloadButton,
+    citationByHeading,
+    onOpenSource,
+  )
 
   return (
     <div
-      className="min-w-0 max-w-full text-[15px] leading-[1.7] break-words [overflow-wrap:anywhere] [&_li>p]:mb-0 [&_li>p]:inline [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&_pre]:max-w-full [&_table_td:first-child]:font-medium [&_table_td:first-child]:text-white/90"
+      className="min-w-0 max-w-full text-[15px] leading-[1.7] break-words [overflow-wrap:anywhere] [&_li>p]:mb-1 [&_li>p:last-child]:mb-0 [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&_pre]:max-w-full [&_table_td:first-child]:font-medium [&_table_td:first-child]:text-white/90 [&_h2+ul]:mt-2 [&_h3+ul]:mt-1.5 [&_blockquote]:my-4"
       style={BODY_STYLE}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>

@@ -8,3 +8,4 @@ pinecone
 groq
 python-dotenv
 requests
+fastembed

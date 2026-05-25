@@ -2,7 +2,13 @@
 import time
 import os
 from pinecone import Pinecone, ServerlessSpec
-from config import PINECONE_API_KEY, PINECONE_INDEX_NAME, PINECONE_CLOUD, PINECONE_REGION
+from config import (
+    PINECONE_API_KEY,
+    PINECONE_INDEX_NAME,
+    PINECONE_CLOUD,
+    PINECONE_REGION,
+    EMBEDDING_DIMENSION,
+)
 
 TTL_DAYS = 30
 TTL_SECONDS = TTL_DAYS * 24 * 60 * 60
@@ -22,7 +28,7 @@ def _get_index():
     if PINECONE_INDEX_NAME not in existing:
         pc.create_index(
             name=PINECONE_INDEX_NAME,
-            dimension=768,           # all-MiniLM-L6-v2 outputs 384-dim vectors
+            dimension=EMBEDDING_DIMENSION,
             metric="cosine",
             spec=ServerlessSpec(
                 cloud=PINECONE_CLOUD,
@@ -272,3 +278,73 @@ def cleanup_expired_documents() -> dict:
         "chunks_deleted": total_deleted,
         "documents_affected": list(affected_docs)
     }
+
+
+# ── Page chunk helpers (for PDF citations) ─────────────────────────
+
+def get_page_chunks(
+    doc_name: str,
+    page: int,
+    namespace: str
+) -> list[dict]:
+    """
+    Returns all chunks for a specific page of a document.
+    
+    Strategy: prefix-list with {namespace}_{doc_name}_page{page}_
+    to match the existing ID format, then fetch metadata.
+    Falls back to a metadata filter query if no prefix hits.
+    """
+    index = _get_index()
+
+    # Primary: prefix match on structured IDs
+    prefix = f"{namespace}_{doc_name}_page{page}_"
+    ids = []
+    for id_batch in index.list(prefix=prefix, namespace=namespace):
+        ids.extend(id_batch)
+
+    if ids:
+        fetched = index.fetch(ids=ids, namespace=namespace)
+        chunks = []
+        for vec_id, vec_data in fetched.vectors.items():
+            meta = vec_data.metadata
+            chunks.append({
+                "chunk_id": vec_id,
+                "text": meta["text"],
+                "page": meta["page"],
+                "source": meta["source"],
+            })
+        chunks.sort(key=lambda c: c["chunk_id"])
+        return chunks
+
+    # Fallback: metadata filter query (zero-vector, broader sweep)
+    results = index.query(
+        vector=[0.0] * EMBEDDING_DIMENSION,
+        top_k=20,
+        namespace=namespace,
+        filter={
+            "source": {"$eq": doc_name},
+            "page":   {"$eq": page},
+        },
+        include_metadata=True,
+    )
+
+    chunks = []
+    for match in results.matches:
+        meta = match.metadata
+        chunks.append({
+            "chunk_id": match.id,
+            "text": meta["text"],
+            "page": meta["page"],
+            "source": meta["source"],
+        })
+    chunks.sort(key=lambda c: c["chunk_id"])
+    return chunks
+
+
+def get_page_text(doc_name: str, page: int, namespace: str) -> str:
+    """
+    Convenience wrapper — returns joined text for a page.
+    Used by the /document endpoint and citation rendering.
+    """
+    chunks = get_page_chunks(doc_name, page, namespace)
+    return "\n\n".join(c["text"] for c in chunks)

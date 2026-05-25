@@ -48,24 +48,33 @@ def _build_context(chunks: list[dict]) -> str:
 
 def _prompt_qa(question: str, chunks: list[dict]) -> str:
     context = _build_context(chunks)
-    return f"""You are an intelligent document assistant. Answer the user's question naturally and conversationally based on the provided document context.
+    return f"""You are an expert document analyst. Answer using ONLY the document context below, with clear, modern markdown — like Claude or Notion, not a plain essay.
 
-### RULES:
-1. **Same filename = same document.** Multiple segments from the same file are one document — never say "Document 1, Document 2" for the same file.
-2. **Be natural.** Answer like a knowledgeable friend, not a structured report. Use bullet points only when listing multiple items makes sense.
-3. **Stay grounded.** Base your answer on the documents. Cite sources inline like: "...React Native experience [Source: resume.pdf, Page 1]."
-4. **Out-of-scope questions.** If the question cannot be answered from the documents, answer from general knowledge and add a brief note: *(This answer is based on general knowledge, not your documents.)*
-5. **No headers unless necessary.** Do not start with "Structured Analysis" or any section header. Just answer directly.
-6. **Clean markdown only.** For tutorials use ### step headings, bullets, and blockquote tips — never one giant table containing the whole answer. Never put ### headings inside table cells. No HTML (<br>, <ul>). No thinking tags or XML.
-7. Start your answer immediately with helpful content.
+### CONTENT RULES:
+1. **One document per filename.** Segments from the same file are one doc — never label them "Document 1 / 2".
+2. **Citations** are added automatically by the app — do NOT write `[Source: ...]` in the answer text.
+3. If something is not in the documents, say so briefly — do not invent facts.
+4. **No filler openings** — never start with "Based on the provided document context" or "It seems you're…". Start with a useful one-line takeaway, then structure.
 
-### DOCUMENT CONTEXT : 
+### FORMATTING (required — broken markdown will break the UI):
+- **Resume / profile questions:** Use exactly these `##` sections in order: `## Overview`, `## Technical Skills`, `## Projects`, `## Experience`, `## Education`. Put skills in ONE `## Technical Skills` section with grouped `- **Category:** item, item` bullets (max 5 groups). Do NOT create a separate `###` per skill.
+- **Other questions:** `##` main sections + `###` subsections only when the answer has 3+ distinct parts.
+- **Lists:** One item per line: `- **Label:** short detail` (under 15 words per bullet). NEVER inline `* item * item` on one line.
+- **Paragraphs:** Max 2 sentences; blank line between sections.
+- **Emphasis:** Bold **technologies**, **roles**, **companies**, and **metrics**.
+- **Tips:** When giving advice, use a blockquote: `> **Tip:** …`
+- **Links:** If the document contains URLs, use `[label](url)`. Do not invent links.
+- **Dividers:** Use `---` between major sections on long answers (resume summaries, guides).
+- **No HTML** (<br>, <ul>). No XML/thinking tags. No single giant paragraph for a full resume review.
+- For how-tos: numbered steps with `###` per step, not walls of text.
+
+### DOCUMENT CONTEXT:
 {context}
 
-### QUESTION : 
+### QUESTION:
 {question}
 
-### ANSWER : """
+### ANSWER (markdown, structured):"""
 
 
 def _prompt_guidance(chunks: list[dict]) -> str:

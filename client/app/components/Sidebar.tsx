@@ -72,18 +72,27 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
 
   useEffect(() => {
     loadChats()
-  }, [userId])
+  }, [userId, pathname])
 
-  // reload sidebar when a new message is saved
   useEffect(() => {
     window.addEventListener('omnimind_chats_updated', loadChats)
     return () => window.removeEventListener('omnimind_chats_updated', loadChats)
   }, [userId])
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    if (!userId) return
     const chatId = uuidv4()
+    try {
+      await fetch('/api/chat/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, userId, title: 'New Chat' }),
+      })
+      loadChats()
+    } catch (err) {
+      console.error('[new-chat]', err)
+    }
     router.push(`/dashboard/chat/${chatId}`)
-    // DB record created automatically on first message via save-message
   }
 
   const handleDeleteChat = async ( chatId: string) => {

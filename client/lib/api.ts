@@ -1,38 +1,70 @@
 const API = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8000'
 
-export async function uploadPDF(file: File, userId: string, chatId: string) {
+type UploadResult = {
+  doc_name: string
+  pages_processed?: number
+  chunks_stored?: number
+  message?: string
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  queued: 'Queued…',
+  parsing: 'Reading PDF…',
+  embedding: 'Indexing text…',
+  storing: 'Saving to search…',
+}
+
+async function waitForUploadJob(
+  jobId: string,
+  onStatus?: (label: string) => void,
+): Promise<UploadResult> {
+  const deadline = Date.now() + 180_000
+  while (Date.now() < deadline) {
+    const res = await fetch(`${API}/upload/status/${jobId}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (data.status !== 'ready' && data.status !== 'error') {
+      onStatus?.(STATUS_LABELS[data.status] ?? 'Indexing…')
+    }
+    if (data.status === 'ready') return data
+    if (data.status === 'error') throw new Error(data.error || 'Upload failed')
+    await new Promise(r => setTimeout(r, 350))
+  }
+  throw new Error('Upload timed out — try again or use a smaller PDF')
+}
+
+export async function uploadPDF(
+  file: File,
+  userId: string,
+  chatId: string,
+  onStatus?: (label: string) => void,
+) {
   const form = new FormData()
   form.append('file', file)
   form.append('user_id', userId)
   form.append('chat_id', chatId)
-  console.log('sending:', userId, chatId)  // 👈 add this
 
   const res = await fetch(`${API}/upload`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
+  const data = await res.json()
 
-// export async function queryDoc(question: string, userId: string, chatId: string) {
-//   const res = await fetch(`${API}/query`, {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ question, user_id: userId, chat_id: chatId })
-//   })
-//   if (!res.ok) throw new Error(await res.text())
-//   return res.json() as Promise<{ answer: string; sources: {source:string;page:number}[]; mode: string }>
-// }
+  if (data.status === 'processing' && data.job_id) {
+    return waitForUploadJob(data.job_id, onStatus)
+  }
+  return data as UploadResult
+}
 
 export async function getDocuments(userId: string) {
   const res = await fetch(`${API}/documents?user_id=${userId}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json() as Promise<{ documents: any[] }>
 }
+
 export async function deleteDocument(docName: string, userId: string, chatId: string) {
   const res = await fetch(`${API}/document/${docName}?user_id=${userId}&chat_id=${chatId}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
-
 
 export async function getGuidance(docName: string, userId: string, chatId: string) {
   const res = await fetch(`${API}/guidance/${docName}?user_id=${userId}&chat_id=${chatId}`)
@@ -46,21 +78,52 @@ export async function getAnalytics(docName: string, userId: string, chatId: stri
   return res.json()
 }
 
-export async function compareDocuments(question: string, userId: string, docA: string, docB: string) {
+export async function compareDocuments(
+  question: string,
+  userId: string,
+  chatId: string,
+  docA: string,
+  docB: string,
+) {
   const res = await fetch(`${API}/compare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, user_id: userId, doc_a: docA, doc_b: docB })
+    body: JSON.stringify({
+      question,
+      user_id: userId,
+      chat_id: chatId,
+      doc_a: docA,
+      doc_b: docB,
+    }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-// stream returns a ReadableStream — consumed by useStream hook
-export function streamQuery(question: string, userId: string, chatId: string, history: {role: string, content: string}[] = [], model?: string): Promise<Response> {
+export function streamQuery(
+  question: string,
+  userId: string,
+  chatId: string,
+  history: { role: string; content: string }[] = [],
+  model?: string,
+): Promise<Response> {
   return fetch(`${API}/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, user_id: userId, chat_id: chatId, history, model })
+    body: JSON.stringify({ question, user_id: userId, chat_id: chatId, history, model }),
   })
+}
+
+export async function fetchDocumentPage(
+  docName: string,
+  page: number,
+  userId: string,
+  chatId: string,
+  snippet?: string,
+) {
+  const params = new URLSearchParams({ user_id: userId, chat_id: chatId })
+  if (snippet) params.set('highlight', snippet)
+  const res = await fetch(`${API}/document/${encodeURIComponent(docName)}/page/${page}?${params}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json() as Promise<{ doc_name: string; page: number; text: string; highlight: string }>
 }

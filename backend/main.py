@@ -1,18 +1,23 @@
+import asyncio
 import json
 import re
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Form, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Form, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services.pdf_parser import extract_text_from_pdf
 from services.chunker import chunk_pages
-from services.embedder import embed_texts, embed_query
+from services.embedder import embed_texts, embed_query, warmup_local_embeddings
 from services.vector_store import (
-    store_chunks, query_chunks,
-    list_user_documents, delete_document,
-    cleanup_expired_documents
+    store_chunks,
+    query_chunks,
+    list_user_documents,
+    delete_document,
+    cleanup_expired_documents,
+    get_page_chunks,
 )
 from services.llm import (
      get_guidance,
@@ -24,11 +29,15 @@ from config import TOP_K_RESULTS, GROQ_MODEL, ALLOWED_MODELS
 
 # ── Startup: run TTL cleanup when server boots ─────────────────────
 
+UPLOAD_JOBS: dict[str, dict] = {}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # runs once on startup — cleans up any stale docs from last session
     summary = cleanup_expired_documents()
     print(f"[Startup cleanup] {summary}")
+    await asyncio.to_thread(warmup_local_embeddings)
     yield
     # shutdown logic here if needed later
 
@@ -61,9 +70,15 @@ def _resolve_model(model: str | None) -> str:
     return GROQ_MODEL
 
 
+def _normalize_doc_name(name: str) -> str:
+    """Match Pinecone source field (upload strips .pdf and spaces)."""
+    return name.strip().replace(".pdf", "").replace(" ", "_")
+
+
 class CompareRequest(BaseModel):
     question: str
     user_id: str
+    chat_id: str = ""
     doc_a: str
     doc_b: str
 
@@ -77,40 +92,63 @@ def health():
 
 # ── Upload ─────────────────────────────────────────────────────────
 
+def _index_pdf(file_bytes: bytes, doc_name: str, scope: str, job_id: str) -> None:
+    try:
+        UPLOAD_JOBS[job_id] = {**UPLOAD_JOBS.get(job_id, {}), "status": "parsing"}
+        pages = extract_text_from_pdf(file_bytes)
+        if not pages:
+            UPLOAD_JOBS[job_id] = {"status": "error", "error": "Could not extract text from PDF."}
+            return
+
+        UPLOAD_JOBS[job_id]["status"] = "embedding"
+        chunks = chunk_pages(pages)
+        embeddings = embed_texts([c["text"] for c in chunks])
+
+        UPLOAD_JOBS[job_id]["status"] = "storing"
+        stored = store_chunks(chunks, embeddings, doc_name, scope)
+
+        UPLOAD_JOBS[job_id] = {
+            "status": "ready",
+            "doc_name": doc_name,
+            "pages_processed": len(pages),
+            "chunks_stored": stored,
+            "message": f"Indexed {doc_name}",
+        }
+    except Exception as exc:
+        UPLOAD_JOBS[job_id] = {"status": "error", "error": str(exc)}
+
+
 @app.post("/upload")
 async def upload_pdf(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user_id: str = Form("anonymous"),
-    chat_id: str = Form("")          # scope upload to a specific chat
+    chat_id: str = Form(""),
 ):
-    print("upload debug:", user_id, chat_id)  # 👈 add this
-
     if not file.filename.endswith(".pdf"):
         raise HTTPException(400, "Only PDF files accepted")
 
     file_bytes = await file.read()
-    pages = extract_text_from_pdf(file_bytes)
-    if not pages:
-        raise HTTPException(400, "Could not extract text.")
-
-    chunks = chunk_pages(pages)
-    embeddings = embed_texts([c["text"] for c in chunks])
-    print(len(embeddings[0]))  # this is your actual dimension
-
     doc_name = file.filename.replace(".pdf", "").replace(" ", "_")
-    
-    # use chat_id as the Pinecone namespace so PDF is scoped to this chat
     scope = chat_id if chat_id else user_id
-    stored = store_chunks(chunks, embeddings, doc_name, scope)
-    background_tasks.add_task(cleanup_expired_documents)
+    job_id = str(uuid.uuid4())
+
+    UPLOAD_JOBS[job_id] = {"status": "queued", "doc_name": doc_name}
+    asyncio.create_task(asyncio.to_thread(_index_pdf, file_bytes, doc_name, scope, job_id))
 
     return {
-        "message": f"Indexed {file.filename}",
+        "status": "processing",
+        "job_id": job_id,
         "doc_name": doc_name,
-        "pages_processed": len(pages),
-        "chunks_stored": stored
+        "message": f"Indexing {file.filename}…",
     }
+
+
+@app.get("/upload/status/{job_id}")
+def upload_status(job_id: str):
+    job = UPLOAD_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Upload job not found")
+    return job
 
 
 
@@ -124,27 +162,43 @@ async def stream(request: QueryRequest):
         query_vec = embed_query(request.question)
         chunks = query_chunks(query_vec, user_id=scope, top_k=8)
 
+    model = _resolve_model(request.model)
+
     def event_generator():
+        # 1. Emit retrieved chunks for citation sidebar (client parses [CHUNKS])
+        if chunks:
+            chunk_payload = [
+                {
+                    "source": c["source"],
+                    "page": c["page"],
+                    "snippet": c["text"][:200],
+                }
+                for c in chunks
+            ]
+            yield f"data: [CHUNKS]{json.dumps(chunk_payload)}\n\n"
+
+        # 2. Stream LLM tokens (plain text — matches useStream.ts)
         full_response = ""
         for token in stream_answer(
             request.question,
             chunks,
             history=request.history or [],
-            model=_resolve_model(request.model),
+            model=model,
         ):
             full_response += token
             yield f"data: {token}\n\n"
 
-        # ✅ these must be INSIDE event_generator
+        # 3. Parse [Source: X, Page N] citations from completed response
         pattern = r'\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]'
         matches = re.findall(pattern, full_response)
         seen = set()
         sources = []
         for source, page in matches:
-            key = f"{source}-{page}"
+            norm = _normalize_doc_name(source.strip())
+            key = f"{norm}-{page}"
             if key not in seen:
                 seen.add(key)
-                sources.append({"source": source.strip(), "page": int(page)})
+                sources.append({"source": norm, "page": int(page)})
 
         if sources:
             yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
@@ -152,6 +206,28 @@ async def stream(request: QueryRequest):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+#pdf citation helper
+@app.get("/document/{doc_name}/page/{page}")
+async def get_document_page(
+    doc_name: str,
+    page: int,
+    user_id: str,          # plain query param, matches the rest of your API
+    chat_id: str = "",
+    highlight: str = "",
+):
+    scope = chat_id if chat_id else user_id
+    chunks = get_page_chunks(_normalize_doc_name(doc_name), page, scope)
+    if not chunks:
+        raise HTTPException(404, f"No content found for {doc_name} page {page}")
+    return {
+        "doc_name": doc_name,
+        "page": page,
+        "text": "\n\n".join(c["text"] for c in chunks),
+        "chunks": chunks,
+        "highlight": highlight,
+    }
+
 
 
 # ── Feature endpoints ──────────────────────────────────────────────
@@ -183,11 +259,12 @@ async def analytics(doc_name: str, user_id: str, chat_id: str = ""):
 
 @app.post("/compare")
 async def compare(request: CompareRequest):
+    scope = request.chat_id if request.chat_id else request.user_id
     query_vec = embed_query(request.question)
 
-    chunks_a = query_chunks(query_vec, user_id=request.user_id,
+    chunks_a = query_chunks(query_vec, user_id=scope,
                             top_k=4, source_filter=request.doc_a)
-    chunks_b = query_chunks(query_vec, user_id=request.user_id,
+    chunks_b = query_chunks(query_vec, user_id=scope,
                             top_k=4, source_filter=request.doc_b)
 
     if not chunks_a:

@@ -49,6 +49,11 @@ export function fixStrayAsterisksAndSubtitles(s: string): string {
 /** Split headings glued to prior text or section numbers: Student###1. or ###2. */
 export function fixGluedHeadings(s: string): string {
   let t = s
+  // ## OverviewYou are → ## Overview + paragraph
+  t = t.replace(
+    /(#{2,3}\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)([A-Z][a-z])/g,
+    '$1$2\n\n$3',
+  )
   t = t.replace(/([a-zA-Z0-9])(#{1,6})(\d+\.)/g, '$1\n\n$2 $3')
   t = t.replace(/(#{1,6})(\d+\.)/g, '$1 $2')
   t = t.replace(/(#{1,6}\s+[^#\n|]{3,80})(#{1,6}\s)/g, '$1\n\n$2')
@@ -451,9 +456,24 @@ function mergeTableBlock(lines: string[]): string[] {
   return merged
 }
 
+/** Model often emits "including:* Item" or "include:* Item" on one line — fix to real lists. */
+export function fixInlineStarBullets(s: string): string {
+  let t = s
+  t = t.replace(/:\s*\*\s+(?=[A-Z])/g, ':\n\n- ')
+  t = t.replace(/;\s*\*\s+(?=[A-Z])/g, ';\n\n- ')
+  t = t.replace(/,\s*\*\s+(?=[A-Z])/g, ',\n\n- ')
+  t = t.replace(/([^\n*])\*\s+(?=[A-Z])/g, '$1\n\n- ')
+  t = t.replace(/\n-\s+([^*\n]+)\*\s+/g, '\n- $1\n\n- ')
+  t = t.replace(/including:\s*\n\n-\s*/gi, 'including:\n\n- ')
+  t = t.replace(/include:\s*\n\n-\s*/gi, 'include:\n\n- ')
+  t = t.replace(/(highlights[^:]*):(?=\S)/gi, '$1:\n\n')
+  t = t.replace(/June(\d{4})/g, 'June $1')
+  return t
+}
+
 /** Fix prose sections jammed into one line after a heading (no newline before list). */
 function fixJammedSections(text: string): string {
-  let s = text
+  let s = fixInlineStarBullets(text)
   s = s.replace(/([a-zA-Z)])(\d+\.\s+\*\*)/g, '$1\n\n$2')
   s = s.replace(/([a-zA-Z)])(-\s+\*\*)/g, '$1\n\n$2')
   s = s.replace(/\)(<?https?:\/\/)/g, ') $1')
@@ -687,6 +707,64 @@ export function repairSplitBoldMarkers(s: string): string {
   return t
 }
 
+/**
+ * Universal cleanup for messy markdown from any LLM (split **, * *, jammed dates, etc.).
+ */
+export function repairUniversalModelMarkdown(s: string): string {
+  let t = s
+
+  // * *bold** or * *Title – description → proper bold / list
+  t = t.replace(/\* \*(?=\*)/g, '*')
+  t = t.replace(/\* \*([^*\n]+?)\*\*/g, '**$1**')
+  t = t.replace(/^\* \*([A-Za-z0-9][^\n*]+)/gm, '- **$1')
+
+  // **Frontend:***React or **Backend:***Express (single * after colon)
+  t = t.replace(/\*\*([^*\n:]+):\*\*([A-Za-z0-9])/g, '**$1:** $2')
+  t = t.replace(/\*\*([^*\n:]+):\*([^*\n]+)/g, '**$1:** $2')
+  t = t.replace(/\n(\*\*[A-Za-z][A-Za-z0-9 /&]+:\*\*)/g, '\n- $1')
+  t = t.replace(/\*\*([A-Za-z0-9 /&]+):\*\*\s*\*\*/g, '**$1:**')
+
+  // Orphan ** lines and empty bold tails: "**Frontend:** **"
+  t = t.replace(/^\s*\*\*\s*$/gm, '')
+  t = t.replace(/:\s*\*\*\s*$/gm, ':')
+  t = t.replace(/:\s*\*\*\s*\n/g, ':\n')
+
+  // Dates jammed: Jan2025, Aug2023, Jun2027
+  t = t.replace(
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{4})\b/gi,
+    '$1 $2',
+  )
+  t = t.replace(/\*(\d{4})/g, ' *$1')
+  t = t.replace(/\)\*---/g, ')\n\n---')
+  t = t.replace(/(\d{4})\*---/g, '$1\n\n---')
+
+  // Skill / tech lines: "React.js**, **" → "React.js, "
+  t = t.replace(/([A-Za-z0-9.+#\/]+)\*\*,\s*\*\*/g, '$1, ')
+  t = t.replace(/,\s*\*\*\s*$/gm, '')
+
+  // Category labels run together: "**Backend:** **Express" on one line
+  t = t.replace(
+    /\*\*([A-Za-z0-9 /&'()]+):\*\*\s*\*\*\s*/g,
+    '**$1:** ',
+  )
+
+  // Bold label then newline list without bullet: "**Backend:**\nExpress" 
+  t = t.replace(
+    /\*\*([A-Za-z0-9 /&]+):\*\*\s*\n+(?=[A-Z])/g,
+    '**$1:**\n\n- ',
+  )
+
+  // Horizontal rule glued to text
+  t = t.replace(/([^\n-])\s*---+\s*(?=#{1,6})/g, '$1\n\n---\n\n')
+  t = t.replace(/([^\n-])---+\s*$/gm, '$1\n\n---')
+
+  t = repairSplitBoldMarkers(t)
+  t = fixJammedSections(t)
+  t = fixInlineStarBullets(t)
+
+  return t
+}
+
 /** Trailing pipe from broken tables: "discounts). |" */
 export function stripStrayPipeCharacters(s: string): string {
   return s
@@ -716,10 +794,25 @@ export function stripIncompleteTableTail(text: string): string {
   return text
 }
 
+/** Remove generic model filler intros so answers start with substance. */
+function stripFillerIntros(s: string): string {
+  return s
+    .replace(
+      /^Based on the provided document context,?\s*(it seems (you're|you are)|here's|here is)[^\n]*\n+/i,
+      '',
+    )
+    .replace(/^Based on the provided document context,?\s*/i, '')
+    .replace(/^It seems you're[^\n]+\n+/i, '')
+}
+
 export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): string {
   let s = stripReasoningBlocks(raw)
+  s = repairUniversalModelMarkdown(s)
+  s = stripFillerIntros(s)
   s = stripHtmlToMarkdown(s)
   s = s.replace(/\[Source:[^\]]*\]/gi, '')
+  s = s.replace(/^\s*#{1,3}\s*$/gm, '')
+  s = s.replace(/([^\n])\n(#{1,3}\s)/g, '$1\n\n$2')
   s = s.replace(/\s*\[Page\s*[\d‑\-–—]+\]/gi, '')
   s = s.replace(/\\n/g, '\n')
   s = fixGluedHeadings(s)
@@ -757,10 +850,13 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
   s = stripEmptyTipBlockquotes(s)
   s = stripOrphanListNumbers(s)
   s = fixStrayAsterisksAndSubtitles(s)
+  s = repairUniversalModelMarkdown(s)
+  s = repairSplitBoldMarkers(s)
   s = s.replace(/^\|\s*(#{1,6}\s)/gm, '$1')
   s = s.replace(/&(\d)/g, '& $1')
   s = s.replace(/(\w)\*\*([A-Z][a-z]+[^*]*\*\*)/g, '$1\n\n**$2')
 
+  s = fixInlineStarBullets(s)
   s = s.replace(/(\d+\.\s+[^\n]*?)(?=\s\d+\.\s)/g, '$1\n')
   s = s.replace(/([^\s\n*])\s\*\s(?=\S)/g, '$1\n* ')
   s = s.replace(/^(\s*)\*(?=\S)/gm, '$1* ')

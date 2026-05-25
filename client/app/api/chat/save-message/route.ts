@@ -28,13 +28,15 @@ export async function POST(req: Request) {
                 $set: {
                     userId,
                     ...(title && { title }),
-                    // if PDF was attached, store in chat metadata
                     ...(metadata.pdfName && {
                         'metadata.hasPdf': true,
                         'metadata.pdfName': metadata.pdfName,
                     }),
                 },
-                $setOnInsert: { chatId }
+                $setOnInsert: {
+                    chatId,
+                    title: title || 'New Chat',
+                },
             },
             { upsert: true, new: true }
         )
@@ -46,6 +48,13 @@ export async function POST(req: Request) {
 
     } catch (error) {
         console.error('[save-message]', error)
-        return NextResponse.json({ error: 'Server error' }, { status: 500 })
+        const msg =
+            error instanceof Error &&
+            (error.name === 'MongooseServerSelectionError' ||
+                error.message.includes('Mongo') ||
+                error.message.includes('whitelist'))
+                ? 'Database unavailable — add your IP in MongoDB Atlas Network Access'
+                : 'Server error'
+        return NextResponse.json({ error: msg }, { status: 500 })
     }
 }

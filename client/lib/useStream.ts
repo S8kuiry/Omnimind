@@ -1,24 +1,51 @@
 import { useState, useCallback, useRef } from 'react'
 import { createStreamSanitizer, stripReasoningBlocks } from './sanitizeModelOutput'
+import { repairUniversalModelMarkdown } from './markdownNormalize'
 import { streamQuery } from './api'
-import { updateChatTitle } from './session'
 import autoNameChat from './autoNameChat'
 import { buildHistoryPayload } from './conversation'
+import {
+  buildSectionSources,
+  sectionSourcesFromHeadings,
+  mergeSourceLists,
+  stripCitationTags,
+  type ChunkRef,
+  type SourceRef,
+} from './sectionSources'
 
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  sources?: { source: string; page: number }[]
+  sources?: SourceRef[]
   mode?: 'document' | 'general'
 }
 
-async function saveMessage(payload: object) {
-  await fetch('/api/chat/save-message', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
+type SaveResult = { ok: true } | { ok: false; error: string }
+
+async function saveMessage(payload: object): Promise<SaveResult> {
+  try {
+    const res = await fetch('/api/chat/save-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      let error = 'Could not save message to history'
+      try {
+        const data = await res.json()
+        if (typeof data.error === 'string') error = data.error
+      } catch {
+        const text = await res.text()
+        if (text) error = text
+      }
+      return { ok: false, error }
+    }
+    window.dispatchEvent(new Event('omnimind_chats_updated'))
+    return { ok: true }
+  } catch {
+    return { ok: false, error: 'Could not reach the server to save this message' }
+  }
 }
 
 export function useStream(userId: string, chatId: string, initialMessages: Message[] = [], model: string = 'llama-3.1-8b-instant') {
@@ -27,6 +54,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
+  const [saveWarning, setSaveWarning] = useState<string | null>(null)
 
   const injectUserMessage = useCallback((content: string) => {
   setMessages(prev => [...prev, {
@@ -82,24 +110,40 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     pendingContentRef.current = ''
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
-    // only name on first message
-    let chatTitle = title
+    let chatTitle = title || 'New Chat'
     if (messages.length === 0 && !title) {
-      const chunks = question.slice(0, 30) + (question.length > 30 ? '...' : '')
-      chatTitle = await autoNameChat(chatId, chunks)
+      chatTitle = await autoNameChat(chatId, question)
       setTitle(chatTitle)
-      window.dispatchEvent(new Event('omnimind_chats_updated'))
     }
 
-    // save once
-    await saveMessage({ chatId, userId, role: 'user', content: question, title: chatTitle, metadata: {} })
+    saveMessage({
+      chatId,
+      userId,
+      role: 'user',
+      content: question,
+      title: chatTitle,
+      metadata: {},
+    }).then(r => {
+      if (!r.ok) setSaveWarning(r.error)
+    })
 
     let fullResponse = ''
+    const snippetMapRef: Record<string, string> = {}
+    const chunksRef: ChunkRef[] = []
+    let hadRagChunks = false
+    let finalSources: SourceRef[] = []
 
     try {
 
 
       const response = await streamQuery(question, userId, chatId, history, model)
+      if (!response.ok) {
+        const errBody = await response.text()
+        throw new Error(errBody || `Chat request failed (${response.status})`)
+      }
+      if (!response.body) {
+        throw new Error('No response stream from server')
+      }
       await fetch(`/api/llm/${userId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -157,22 +201,47 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
           const token = line.slice(6)
           if (token === '[DONE]') break
 
-          // ✅ handle sources event
+          if (token.startsWith('[CHUNKS]')) {
+            try {
+              const chunks = JSON.parse(token.slice(8)) as {
+                source: string; page: number; snippet: string
+              }[]
+              hadRagChunks = true
+              for (const c of chunks) {
+                const src = c.source.replace(/\.pdf$/i, '')
+                const key = `${src}-${c.page}`
+                snippetMapRef[key] = c.snippet
+                chunksRef.push({
+                  source: src,
+                  page: c.page,
+                  snippet: c.snippet,
+                })
+              }
+            } catch { /* ignore malformed payload */ }
+            continue
+          }
+
           if (token.startsWith('[SOURCES]')) {
             try {
-              const raw_sources = JSON.parse(token.slice(9))
+              const raw_sources = JSON.parse(token.slice(9)) as { source: string; page: number }[]
               const seen = new Set<string>()
-              const sources = raw_sources.filter((s: any) => {
-                const key = `${s.source}-${s.page}`
-                if (seen.has(key)) return false
-                seen.add(key)
-                return true
-              })
+              finalSources = raw_sources
+                .filter(s => {
+                  const key = `${s.source}-${s.page}`
+                  if (seen.has(key)) return false
+                  seen.add(key)
+                  return true
+                })
+                .map(s => ({
+                  source: s.source.replace(/\.pdf$/i, ''),
+                  page: s.page,
+                  snippet: snippetMapRef[`${s.source.replace(/\.pdf$/i, '')}-${s.page}`],
+                }))
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, sources } : m
+                m.id === assistantId ? { ...m, sources: finalSources } : m
               ))
-            } catch { }
-            continue  // ✅ don't process as text
+            } catch { /* ignore */ }
+            continue
           }
 
           // ✅ buffer incomplete [Source:] tags
@@ -210,21 +279,61 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
         flushPending(assistantId)
       }
 
-      fullResponse = stripReasoningBlocks(fullResponse)
+      fullResponse = stripCitationTags(
+        repairUniversalModelMarkdown(stripReasoningBlocks(fullResponse)),
+      )
+
+      if (hadRagChunks && chunksRef.length > 0) {
+        let sectionSources = buildSectionSources(fullResponse, chunksRef)
+        if (!sectionSources.some(s => s.label)) {
+          sectionSources = sectionSourcesFromHeadings(fullResponse, chunksRef)
+        }
+        if (sectionSources.some(s => s.label)) {
+          finalSources = sectionSources
+        } else {
+          finalSources = mergeSourceLists(finalSources, sectionSources)
+          if (finalSources.length === 0) {
+            const seen = new Set<string>()
+            finalSources = chunksRef.filter(c => {
+              const k = `${c.source}-${c.page}`
+              if (seen.has(k)) return false
+              seen.add(k)
+              return true
+            })
+          }
+        }
+      }
 
       setMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, content: fullResponse } : m
+        m.id === assistantId
+          ? { ...m, content: fullResponse, sources: finalSources.length ? finalSources : m.sources, mode: hadRagChunks ? 'document' : 'general' }
+          : m
       ))
 
-      await saveMessage({
+      saveMessage({
         chatId, userId, role: 'assistant', content: fullResponse,
-        metadata: { mode: 'general', model, latencyMs: Date.now() - start }
+        metadata: {
+          sources: finalSources,
+          mode: hadRagChunks ? 'document' : 'general',
+          model,
+          latencyMs: Date.now() - start,
+        },
+      }).then(r => {
+        if (!r.ok) setSaveWarning(r.error)
       })
 
     } catch (err) {
+      console.error('[stream]', err)
+      let msg = 'Something went wrong. Please try again.'
+      if (err instanceof Error && err.message) {
+        if (err.message.includes('dimension')) {
+          msg = 'Search index mismatch — re-upload your PDF after restarting the backend.'
+        } else if (err.message.length < 200) {
+          msg = err.message
+        }
+      }
       setMessages(prev => prev.map(m =>
-        m.id === assistantId
-          ? { ...m, content: 'Something went wrong. Please try again.' } : m
+        m.id === assistantId ? { ...m, content: msg } : m
       ))
     } finally {
       streamingMsgIdRef.current = null
@@ -242,5 +351,7 @@ export function useStream(userId: string, chatId: string, initialMessages: Messa
     injectLoading,
     updateMessage,
     injectUserMessage,
+    saveWarning,
+    dismissSaveWarning: () => setSaveWarning(null),
   }
 }
