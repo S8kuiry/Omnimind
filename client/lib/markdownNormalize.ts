@@ -43,6 +43,47 @@ export function fixStrayAsterisksAndSubtitles(s: string): string {
   t = t.replace(/\n\s*\*\s*---/g, '\n\n---')
   t = t.replace(/^\s*\*\s*$/gm, '')
   t = t.replace(/\ba(\d)(rd|st|nd|th)\b/gi, 'a $1$2')
+  t = stripOrphanBoldMarkers(t)
+  return t
+}
+
+/**
+ * Remove broken ** / * the model leaves visible (e.g. **Stack:***React, * *bullet, Node.js**).
+ */
+export function stripOrphanBoldMarkers(s: string): string {
+  let t = s
+
+  // **Label:***Value or **Label:****Value
+  t = t.replace(/\*\*([^*\n]+?):\*\*\*+([A-Za-z0-9])/g, '**$1:** $2')
+  t = t.replace(/\*\*([^*\n]+?):\*\*\s*\*+([A-Za-z0-9])/g, '**$1:** $2')
+
+  // **Languages & Frameworks:***C++ (single * glued to closing **)
+  t = t.replace(/\*\*([^*\n]+?):\*\*\*([^*\s\n])/g, '**$1:** $2')
+
+  // Join bold split across lines: **\n\nNext.js15**
+  t = t.replace(/\*\*\s*\n+\s*([^*\n]+?)\s*\*\*/g, '**$1**')
+
+  // * *Engineered / * *Enterprise → list bullet
+  t = t.replace(/^\s*\*\s+\*\s*/gm, '- ')
+  t = t.replace(/\n\s*\*\s+\*\s*/g, '\n- ')
+
+  // **Title**- ** or **Title**- detail
+  t = t.replace(/(\*\*[^*\n]+\*\*)\s*-\s*\*\*/g, '$1\n\n- **')
+  t = t.replace(/(\*\*[^*\n]+\*\*)\s*-\s+(?=[A-Za-z])/g, '$1\n\n- ')
+
+  // Trailing orphan ** on label/value lines: **Stack:** … Node.js**
+  t = t.replace(/^(- \*\*[^*\n]+:\*\*[^\n]*)\*\*\s*$/gm, '$1')
+  t = t.replace(/([A-Za-z0-9.,/+#)])\*\*\s*$/gm, '$1')
+
+  // "React.js**, **" → "React.js, "
+  t = t.replace(/([A-Za-z0-9.+#\/]+)\*\*,\s*\*\*/g, '$1, ')
+  t = t.replace(/,\s*\*\*\s*$/gm, '')
+
+  // Orphan ** after colon or on empty lines
+  t = t.replace(/:\s*\*\*\s*$/gm, ':')
+  t = t.replace(/^\s*\*\*\s*$/gm, '')
+  t = t.replace(/\*\*\s*\*\*/g, '')
+
   return t
 }
 
@@ -769,6 +810,7 @@ export function repairUniversalModelMarkdown(s: string): string {
   t = repairSplitBoldMarkers(t)
   t = fixJammedSections(t)
   t = fixInlineStarBullets(t)
+  t = stripOrphanBoldMarkers(t)
 
   return t
 }
@@ -902,6 +944,8 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
   s = s.replace(/([^\n])\n(\|[^\n]+\|)/g, '$1\n\n$2')
   s = s.replace(/\n{3,}/g, '\n\n')
   s = s.replace(/[ \t]+$/gm, '')
+
+  s = stripOrphanBoldMarkers(s)
 
   if (opts?.forStream) {
     s = stripIncompleteTableTail(s)

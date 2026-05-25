@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { createStreamSanitizer, stripReasoningBlocks } from './sanitizeModelOutput'
-import { repairUniversalModelMarkdown } from './markdownNormalize'
+import { normalizeMarkdown } from './markdownNormalize'
 import { streamQuery } from './api'
 import autoNameChat from './autoNameChat'
 import { buildHistoryPayload } from './conversation'
@@ -303,7 +303,7 @@ export function useStream(
       }
 
       fullResponse = stripCitationTags(
-        repairUniversalModelMarkdown(stripReasoningBlocks(fullResponse)),
+        normalizeMarkdown(stripReasoningBlocks(fullResponse)),
       )
 
       if (hadRagChunks && chunksRef.length > 0) {
