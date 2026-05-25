@@ -349,6 +349,15 @@ def resolve_doc_name(requested: str, namespace: str) -> str:
     return requested
 
 
+def _coerce_page(value) -> int:
+    try:
+        if value is None:
+            return 0
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _fetch_chunks_by_ids(
     index,
     ids: list[str],
@@ -362,18 +371,25 @@ def _fetch_chunks_by_ids(
         batch = ids[i : i + 100]
         if not batch:
             continue
-        fetched = index.fetch(ids=batch, namespace=namespace)
+        try:
+            fetched = index.fetch(ids=batch, namespace=namespace)
+        except Exception as exc:
+            print(f"[vector_store] fetch failed: {exc}")
+            continue
         for vec_id, vec_data in fetched.vectors.items():
-            meta = vec_data.metadata
-            meta_page = int(meta.get("page", -1))
-            meta_source = meta.get("source", "")
+            meta = vec_data.metadata or {}
+            meta_page = _coerce_page(meta.get("page"))
+            meta_source = str(meta.get("source") or "")
+            text = meta.get("text") or ""
+            if not text:
+                continue
             if page is not None and meta_page != page:
                 continue
             if source is not None and meta_source != source:
                 continue
             chunks.append({
                 "chunk_id": vec_id,
-                "text": meta["text"],
+                "text": text,
                 "page": meta_page,
                 "source": meta_source,
             })
@@ -412,10 +428,10 @@ def get_page_chunks(
     # 3) Citation page may be wrong — return nearest page that has chunks
     all_doc = _fetch_chunks_by_ids(index, ids, namespace, source=resolved)
     if all_doc:
-        pages = sorted({int(c["page"]) for c in all_doc if c["page"] > 0})
+        pages = sorted({c["page"] for c in all_doc if c["page"] > 0})
         if pages:
             nearest = min(pages, key=lambda p: abs(p - page))
-            return [c for c in all_doc if int(c["page"]) == nearest]
+            return [c for c in all_doc if c["page"] == nearest]
 
     # 4) Metadata filter query (last resort)
     try:
@@ -431,12 +447,15 @@ def get_page_chunks(
         )
         chunks = []
         for match in results.matches:
-            meta = match.metadata
+            meta = match.metadata or {}
+            text = meta.get("text") or ""
+            if not text:
+                continue
             chunks.append({
                 "chunk_id": match.id,
-                "text": meta["text"],
-                "page": int(meta.get("page", page)),
-                "source": meta.get("source", resolved),
+                "text": text,
+                "page": _coerce_page(meta.get("page", page)),
+                "source": str(meta.get("source") or resolved),
             })
         chunks.sort(key=lambda c: c["chunk_id"])
         if chunks:

@@ -252,11 +252,16 @@ def stream_answer(
 
     # Social turns: chat mode — no document dump, minimal history
     if conversational:
-        messages = [{"role": "system", "content": CHAT_SYSTEM}]
-        for msg in trimmed[-4:]:
+        greet_system = (
+            CHAT_SYSTEM
+            + "\n\nThe user sent a greeting or very short message. "
+            "Reply in plain text, max 2 sentences. Forbidden: ## headings, bullet lists, Tips, resume data."
+        )
+        messages = [{"role": "system", "content": greet_system}]
+        for msg in trimmed[-2:]:
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": question})
-        temperature = 0.6
+        temperature = 0.4
     elif chunks or force_document_mode:
         system = DOC_SYSTEM
         if doc_names:
@@ -284,13 +289,14 @@ def stream_answer(
         messages.append({"role": "user", "content": question})
         temperature = 0.7
 
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=2048,
-        stream=True
-    )
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 120 if conversational else 2048,
+        "stream": True,
+    }
+    stream = client.chat.completions.create(**kwargs)
     for chunk in stream:
         token = chunk.choices[0].delta.content
         if token:

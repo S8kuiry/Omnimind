@@ -21,6 +21,7 @@ from services.vector_store import (
     resolve_doc_name,
     list_doc_names_in_namespace,
     retrieve_chunks_for_question,
+    _coerce_page,
 )
 from services.llm import (
      get_guidance,
@@ -167,8 +168,10 @@ async def stream(request: QueryRequest):
         doc_names = list_doc_names_in_namespace(scope)
 
     chunks: list[dict] = []
-    force_doc_mode = bool(doc_names) or request.has_documents
-    if not is_conversational(request.question):
+    conversational = is_conversational(request.question)
+    # Keep greetings short — do not force document/RAG mode just because a PDF exists
+    force_doc_mode = (bool(doc_names) or request.has_documents) and not conversational
+    if not conversational:
         chunks = retrieve_chunks_for_question(
             request.question,
             scope,
@@ -228,29 +231,39 @@ async def stream(request: QueryRequest):
 async def get_document_page(
     doc_name: str,
     page: int,
-    user_id: str,          # plain query param, matches the rest of your API
+    user_id: str,
     chat_id: str = "",
     highlight: str = "",
 ):
-    scope = chat_id if chat_id else user_id
-    norm = _normalize_doc_name(doc_name)
-    resolved = resolve_doc_name(norm, scope)
-    chunks = get_page_chunks(resolved, page, scope)
-    if not chunks:
-        available = list_doc_names_in_namespace(scope)
-        raise HTTPException(
-            404,
-            f"No content found for {doc_name} page {page} in this chat. "
-            f"Indexed documents: {available or 'none — upload PDF in this chat'}",
-        )
-    actual_page = int(chunks[0]["page"])
-    return {
-        "doc_name": resolved,
-        "page": actual_page,
-        "text": "\n\n".join(c["text"] for c in chunks),
-        "chunks": chunks,
-        "highlight": highlight,
-    }
+    try:
+        scope = chat_id if chat_id else user_id
+        norm = _normalize_doc_name(doc_name)
+        resolved = resolve_doc_name(norm, scope)
+        chunks = get_page_chunks(resolved, page, scope)
+        if not chunks:
+            try:
+                available = list_doc_names_in_namespace(scope)
+            except Exception as exc:
+                print(f"[get_document_page] list docs failed: {exc}")
+                available = []
+            raise HTTPException(
+                404,
+                f"No content found for {doc_name} page {page} in this chat. "
+                f"Indexed documents: {available or 'none — upload PDF in this chat'}",
+            )
+        actual_page = _coerce_page(chunks[0].get("page", page)) or page
+        return {
+            "doc_name": resolved,
+            "page": actual_page,
+            "text": "\n\n".join(c["text"] for c in chunks),
+            "chunks": chunks,
+            "highlight": highlight[:2000] if highlight else "",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[get_document_page] {doc_name} p{page} chat={chat_id}: {exc}")
+        raise HTTPException(500, f"Failed to load document page: {exc}") from exc
 
 
 

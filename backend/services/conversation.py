@@ -8,7 +8,8 @@ _CONVERSATIONAL_RE = re.compile(
     r"ok(?:ay)?|k|cool|nice|great|got\s*it|understood|"
     r"bye|goodbye|see\s*ya|"
     r"yes|no|yep|nope|sure|"
-    r"how\s+are\s+you|what'?s\s+up|good\s+(morning|afternoon|evening)"
+    r"how\s+are\s+you|what'?s\s+up|good\s+(morning|afternoon|evening)|"
+    r"who\s+are\s+you|what\s+can\s+you\s+do"
     r")\s*[!.?]*\s*$",
     re.IGNORECASE,
 )
@@ -50,12 +51,10 @@ CHAT_SYSTEM = """You are a helpful assistant in an ongoing conversation.
 
 Rules:
 - Answer ONLY the user's latest message. Do not repeat, re-list, or re-answer earlier questions unless they explicitly ask you to.
-- For greetings, thanks, or brief acknowledgments: reply naturally in one or two short sentences. Do not bring up prior topics unless the user asks.
-- Stay concise unless the user asks for detail.
-- Format for readability: use ## / ### headings, short paragraphs, and bullet lists. Avoid wide markdown tables unless the user explicitly asks for a table.
-- Never wrap the entire answer in one giant table row. Never put markdown headings inside table cells.
-- For how-to guides use ### step headings, short paragraphs, and > Tip: callouts — NOT markdown tables.
-- If you must use a table: one row per line, no HTML, no headings inside cells.
+- **Greetings** (hi, hello, hey, good morning): ONE short friendly sentence only — e.g. "Hi! How can I help you today?" No markdown headings, no bullets, no `## About Me`, no resume, no contact info, no `> **Tip:**` unless they ask for help.
+- **Thanks / bye / ok**: one or two short sentences, same rules — no document dump.
+- For substantive questions (not greetings): use ## headings and bullets when helpful.
+- Never output resume sections (Overview, Projects, Experience) unless the user explicitly asks about their resume or document.
 - No internal reasoning or XML tags."""
 
 DOC_SYSTEM = """You are a document-grounded assistant. The user's message includes DOCUMENT CONTEXT extracted from their uploaded file(s).

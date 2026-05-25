@@ -139,7 +139,10 @@ export async function fetchDocumentPage(
 ) {
   const resolved = normalizeDocName(docName)
   const params = new URLSearchParams({ user_id: userId, chat_id: chatId })
-  if (snippet) params.set('highlight', snippet)
+  if (snippet) {
+    // Keep URL short — long snippets can break proxies; backend only echoes this for UI
+    params.set('highlight', snippet.slice(0, 500))
+  }
   const res = await fetch(
     `${API}/document/${encodeURIComponent(resolved)}/page/${page}?${params}`,
   )
