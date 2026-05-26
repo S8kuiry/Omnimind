@@ -11,40 +11,25 @@ client = Groq(api_key=GROQ_API_KEY)
 
 # ── Prompt builders ────────────────────────────────────────────────
 
+# def _build_context(chunks: list[dict]) -> str:
+#     parts = [
+#         f"--- DOCUMENT SEGMENT ---\n"
+#         f"[Document: {c['source']}, Page: {c['page']}]\n"
+#         f"Content: {c['text']}"
+#         for c in chunks
+#     ]
+#     return "\n\n".join(parts)
 def _build_context(chunks: list[dict]) -> str:
     parts = [
         f"--- DOCUMENT SEGMENT ---\n"
-        f"[Document: {c['source']}, Page: {c['page']}]\n"
+        f"[Document: {c['source'].replace('.pdf', '')}, Page: {c['page']}]\n"
         f"Content: {c['text']}"
         for c in chunks
     ]
     return "\n\n".join(parts)
 
 
-# def _prompt_qa(question: str, chunks: list[dict]) -> str:
-#     """
-#     Standard Q&A — your upgraded prompt, kept exactly as you wrote it.
-#     Used for all regular chat questions.
-#     """
-#     context = _build_context(chunks)
-#     return f"""You are a High-Performance AI Document Analyst. Your goal is to provide accurate, cited, and context-aware responses.
 
-# ### MANDATORY PROTOCOLS: 
-# 1. **Source Awareness:** Multiple segments from the SAME filename are parts of ONE document — do NOT treat them as separate documents.
-# 2. **Task Adaptation:**
-#    - Specific fact → direct answer with citation.
-#    - Comparison asked → contrast the documents involved.
-#    - Multiple files but question about one → focus on relevant file, ignore others.
-# 3. **Citation Format:** Every statement must cite its source: "The candidate knows React [Source: dev_resume.pdf, Page 2]."
-# 4. **Null Rule:** If not in context, say: "Based on the provided documents, I cannot find information regarding [X]." Do NOT use outside knowledge.
-
-# ### CONTEXT : 
-# {context}
-
-# ### USER QUESTION : 
-# {question}
-
-# ### STRUCTURED ANALYSIS: """
 
 def _wants_full_resume_summary(question: str) -> bool:
     """Only use the full resume outline when the user asked for a broad profile summary."""
@@ -75,7 +60,7 @@ def _prompt_qa(question: str, chunks: list[dict], doc_names: list[str] | None = 
     if _wants_full_resume_summary(question):
         format_block = """
 ### FORMAT (full resume summary):
-Use `## Contact`, `## Education`, `## Experience`, `## Projects`, `## Technical Skills` — ONLY facts from the document. Skip empty sections.
+Use `## Contact`, `## Education`, `## Experience`,`## Hidden Patterns`,`Important loophole areas`,`## Research Insights`, `## Projects`, `## Technical Skills` — ONLY facts from the document. Skip empty sections.
 Each section = `## Heading` then `- **Label:** value` bullets (one per line). Projects get `- **Name** — summary` plus `- detail` sub-bullets.
 """
     else:
@@ -87,15 +72,44 @@ Each section = `## Heading` then `- **Label:** value` bullets (one per line). Pr
 
     return f"""Answer using ONLY the DOCUMENT CONTEXT below.
 
+### CITATION RULES (mandatory):
+- After every sentence that uses document content, append a citation in EXACTLY this format:
+  [Source: doc_name, Page N]
+- Use the exact doc_name as it appears in the DOCUMENT CONTEXT headers (no .pdf extension).
+- Place the citation immediately after the sentence it supports — never group at the end.
+- One citation per sentence maximum.
+- If an entire paragraph draws from one source, one citation at the end of the paragraph is fine.
+
+Example output:
+The candidate has 3 years of React experience [Source: resume, Page 2].
+They also hold a BSc in Computer Science [Source: resume, Page 1].
+
 ### GROUNDING:
 1. Document context is the only source of truth — no training data.
 2. Do not invent projects, stacks, or features not in the context.
 3. Segments with the same filename are ONE document.
-4. Do NOT write `[Source: ...]` — citations are added per section by the app.
 
-### MARKDOWN (strict):
-- `##` per section; `- **Label:** value` bullets; never `**Label:***value` or glued lines like `151- **`.
-- Tech/stacks: comma-separated after one label bullet.
+### MARKDOWN (strict — follow exactly):
+## Structure and Hierarchy
+- Use `##` for major section dividers. 
+- Do not use `###` or deeper heading depths unless the data requires nested sub-categories.
+- Separate all sections with exactly one blank line. Do not use double blank lines, horizontal rules (`---`), trailing dashes, or structural dividers.
+
+## Text Formatting and Emphasis
+- Never start any sentence with ('**','*','-',`_`,'|')
+- Apply bold styling (`**Label:**`) to metadata or categorical labels only. 
+- Never bold entire sentences, single phrases, or random descriptive words mid-paragraph.
+- Maintain a concise, objective, and professional tone. Completely eliminate introductory filler, transition statements, or conversational phrases (e.g., "Certainly", "Based on the text").
+
+## Data Representation Rules
+- **Technical Stacks:** Group all frameworks, languages, and tools into a single, comma-separated bullet point. Do not split items across multiple lines.
+  * Correct: `- **Stack:** React, Node.js, PostgreSQL`
+  * Incorrect: Separate bullets for each technology.
+- **Attributes, Facts, and Timelines:** Output concrete skills, factual metrics, and chronological dates exclusively as clean bullet points.
+- **Explanations and Syntheses:** Output contextual explanations, reasoning, or qualitative summaries as short prose paragraphs limited to 3-6 sentences maximum.
+- **Structural Integrity:** Never mix formatting types. Do not initiate a bullet point and then continue it as a prose block. Ensure labels and values occupy the exact same line.
+  * Correct: `- **Label:** Value [Source: filename, Page X].`
+  * Incorrect: `- **Label:**\nValue` or `- **Label:***Value`
 
 ### INDEXED FILES:
 {indexed}
@@ -108,7 +122,6 @@ Each section = `## Heading` then `- **Label:** value` bullets (one per line). Pr
 {question}
 
 ### ANSWER:"""
-
 
 def _prompt_guidance(chunks: list[dict]) -> str:
     """
@@ -176,7 +189,7 @@ Anything Document A says that Document B contradicts, or vice versa.
 **VERDICT**
 Which document is more detailed / comprehensive on the topic asked, and why.
 
-Cite every point with [Source: filename, Page X]."""
+Cite every point inline immediately after the sentence, format: [Source: doc_name, Page N]."""
 
 
 def _prompt_analytics(chunks: list[dict]) -> str:

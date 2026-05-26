@@ -47,7 +47,24 @@ async function saveMessage(payload: object): Promise<SaveResult> {
     return { ok: false, error: 'Could not reach the server to save this message' }
   }
 }
+function parseInlineCitations(text: string): { source: string; page: number; surroundingText: string }[] {
+  const pattern = /\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]/gi
+  const results: { source: string; page: number; surroundingText: string }[] = []
+  let match: RegExpExecArray | null
 
+  while ((match = pattern.exec(text)) !== null) {
+    const source = match[1].trim().replace(/\.pdf$/i, '')
+    const page = parseInt(match[2], 10)
+
+    // grab the sentence immediately before the citation as the label
+    const before = text.slice(Math.max(0, match.index - 200), match.index)
+    const lastSentence = before.split(/(?<=[.!?])\s+/).pop()?.trim() ?? ''
+
+    results.push({ source, page, surroundingText: lastSentence.slice(-80) })
+  }
+
+  return results
+}
 export function useStream(
   userId: string,
   chatId: string,
@@ -63,12 +80,12 @@ export function useStream(
   const [saveWarning, setSaveWarning] = useState<string | null>(null)
 
   const injectUserMessage = useCallback((content: string) => {
-  setMessages(prev => [...prev, {
-    id: crypto.randomUUID(),
-    role: 'user' as const,
-    content,
-  }])
-}, [])
+    setMessages(prev => [...prev, {
+      id: crypto.randomUUID(),
+      role: 'user' as const,
+      content,
+    }])
+  }, [])
 
   const injectLoading = useCallback((id: string) => {
     setMessages(prev => [...prev, {
@@ -302,32 +319,63 @@ export function useStream(
         flushPending(assistantId)
       }
 
+      // Parse citations BEFORE stripping them
+      const inlineCitations = parseInlineCitations(fullResponse)
+
+      // Now strip and normalize for display
       fullResponse = stripCitationTags(
         normalizeMarkdown(stripReasoningBlocks(fullResponse)),
       )
 
-      if (hadRagChunks && chunksRef.length > 0) {
-        if (!finalSources.some(s => s.label)) {
-          let sectionSources = buildSectionSources(fullResponse, chunksRef)
-          if (!sectionSources.some(s => s.label)) {
-            sectionSources = sectionSourcesFromHeadings(fullResponse, chunksRef)
-          }
-          if (sectionSources.some(s => s.label)) {
-            finalSources = sectionSources
-          } else {
-            finalSources = mergeSourceLists(finalSources, sectionSources)
-            if (finalSources.length === 0) {
-              const seen = new Set<string>()
-              finalSources = chunksRef.filter(c => {
-                const k = `${c.source}-${c.page}`
-                if (seen.has(k)) return false
-                seen.add(k)
-                return true
-              })
-            }
-          }
-        }
+      // Build sources from inline citations (accurate) or fall back to raw chunks (honest)
+      if (inlineCitations.length > 0) {
+        const seen = new Set<string>()
+        finalSources = inlineCitations
+          .filter(c => {
+            const k = `${c.source}-${c.page}`
+            if (seen.has(k)) return false
+            seen.add(k)
+            return true
+          })
+          .map(c => ({
+            source: c.source,
+            page: c.page,
+            snippet: snippetMapRef[`${c.source}-${c.page}`],
+            label: c.surroundingText,
+          }))
+      } else if (hadRagChunks && chunksRef.length > 0) {
+        // LLM didn't cite inline — show retrieved chunks, no fake section matching
+        const seen = new Set<string>()
+        finalSources = chunksRef.filter(c => {
+          const k = `${c.source}-${c.page}`
+          if (seen.has(k)) return false
+          seen.add(k)
+          return true
+        }).map(c => ({ source: c.source, page: c.page, snippet: c.snippet }))
       }
+
+      // if (hadRagChunks && chunksRef.length > 0) {
+      //   if (!finalSources.some(s => s.label)) {
+      //     let sectionSources = buildSectionSources(fullResponse, chunksRef)
+      //     if (!sectionSources.some(s => s.label)) {
+      //       sectionSources = sectionSourcesFromHeadings(fullResponse, chunksRef)
+      //     }
+      //     if (sectionSources.some(s => s.label)) {
+      //       finalSources = sectionSources
+      //     } else {
+      //       finalSources = mergeSourceLists(finalSources, sectionSources)
+      //       if (finalSources.length === 0) {
+      //         const seen = new Set<string>()
+      //         finalSources = chunksRef.filter(c => {
+      //           const k = `${c.source}-${c.page}`
+      //           if (seen.has(k)) return false
+      //           seen.add(k)
+      //           return true
+      //         })
+      //       }
+      //     }
+      //   }
+      // }
 
       setMessages(prev => prev.map(m =>
         m.id === assistantId

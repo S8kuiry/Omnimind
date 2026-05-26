@@ -193,40 +193,47 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
         <span className="text-xs truncate">{chat.title}</span>
       </Link>
 
-      {/* Triple Dot Button - Shown on Hover OR if Menu is Open */}
-      {(hoveredChat === chat.chatId || isMenuOpen) && (
-        <div className="absolute right-2 top-1/2 -translate-y-1/2">
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              setMenuOpenId(isMenuOpen ? null : chat.chatId);
-            }}
-            className="p-1 rounded hover:bg-white/10 transition-colors"
-            style={{ color: 'rgba(255,255,255,0.5)' }}
-          >
-            {/* Vertical Triple Dot Icon */}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
-            </svg>
-          </button>
+     {/* Triple Dot Button - Shown on Hover OR if Menu is Open */}
+{(hoveredChat === chat.chatId || isMenuOpen) && (
+  <div 
+    className="absolute right-2 top-1/2 -translate-y-1/2 z-20"
+    onClick={(e) => e.stopPropagation()} // 👈 Stop any clicks inside this area from hitting the Link
+  >
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation(); // 👈 Stops bubbling right away
+        setMenuOpenId(isMenuOpen ? null : chat.chatId);
+      }}
+      className="p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+      style={{ color: 'rgba(255,255,255,0.5)' }}
+    >
+      {/* Vertical Triple Dot Icon */}
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
+      </svg>
+    </button>
 
-          {/* Mini Dropdown Menu */}
-          {isMenuOpen && (
-            <div className="absolute right-0 mt-1 w-24 bg-[#1a1a1a] border border-white/20 rounded-md shadow-xl z-50 overflow-hidden">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setChatToDelete(chat.chatId); // Open confirmation modal
-                  setMenuOpenId(null);
-                }}
-                className="cursor-pointer w-full flex items-center justify-center text-left px-3 py-2 text-[10px] text-red-400 hover:bg-gray-900/60 transition-colors"
-              >
-                Delete Chat
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+    {/* Mini Dropdown Menu */}
+    {isMenuOpen && (
+      <div className="absolute right-0 mt-1 w-24 bg-[#1a1617] border border-white/20 rounded-md shadow-xl z-50 overflow-hidden">
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation(); // 👈 Prevents the parent link from routing
+            setChatToDelete(chat.chatId); // Open confirmation modal
+            setMenuOpenId(null);
+          }}
+          className="cursor-pointer w-full flex items-center justify-center text-left px-3 py-2 text-[10px] text-red-400 hover:bg-white/5 transition-colors"
+        >
+          Delete Chat
+        </button>
+      </div>
+    )}
+  </div>
+)}
+
+
     </div>
   );
 })}
@@ -264,7 +271,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
 
       {/* Bottom */}
       <div className="px-2 py-3 space-y-0.5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-        {bottomItems.map(item => (
+        {/* {bottomItems.map(item => (
           <Link key={item.href} href={item.href}
             className="flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150"
             style={{ color: 'rgba(255,255,255,0.35)' }}
@@ -274,7 +281,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
             <span className="flex-shrink-0">{item.icon}</span>
             {!collapsed && <span className="text-xs tracking-wide">{item.label}</span>}
           </Link>
-        ))}
+        ))} */}
 
         {/* User */}
         <div className="flex items-center gap-3 px-3 py-2 mt-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)' }}>

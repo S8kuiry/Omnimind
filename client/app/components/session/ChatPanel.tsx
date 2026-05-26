@@ -211,7 +211,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
       </div>
 
       {/* PREMIUM CHAT INPUT BAR CONTAINER */}
-      <div className="px-4 pb-6 max-w-5xl mx-auto w-full pt-2 sticky bottom-5 z-10 backdrop-blur-sm bg-transparent">
+      <div className={`px-4 pb-6 max-w-5xl mx-auto w-full pt-2 sticky bottom-5 ${hasDocs.length > 0 ? "bottom-11" : "bottom-6"} z-10 backdrop-blur-sm bg-transparent`}>
         <div
           className="flex flex-col items-start justify-start relative gap-3 rounded-2xl px-4 py-3 shadow-2xl backdrop-blur-xl transition-all duration-300"
           style={{
