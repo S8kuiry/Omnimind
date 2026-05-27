@@ -1,7 +1,7 @@
 'use client'
 
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import React, { useEffect, useState } from 'react'
 import { toast } from "react-hot-toast";
 
@@ -19,7 +19,6 @@ export default function LoginModal({ isOpen, onClose, initialErrorCode }: LoginM
   const [username, setUsername] = useState<string>("");
   const [otp, setOtp] = useState<string>("");
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [uiError, setUiError] = useState<{ title: string; message: string } | null>(null);
 
   function friendlyAuthError(code: string) {
@@ -41,15 +40,6 @@ export default function LoginModal({ isOpen, onClose, initialErrorCode }: LoginM
         return { title: "Sign-in error", message: "Something went wrong while signing in. Please try again." };
     }
   }
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const code = searchParams.get("error");
-    if (!code) return;
-    setUiError(friendlyAuthError(code));
-    setStep(1);
-    router.replace("/");
-  }, [isOpen, searchParams, router]);
 
   useEffect(() => {
     if (!isOpen) return;

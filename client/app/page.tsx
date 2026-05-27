@@ -361,11 +361,13 @@ export default function HomePage() {
       </div>
 
 
-      <LoginModal
-        isOpen={isAuthModalOpen}
-        onClose={() => { setIsAuthModalOpen(false); setAuthErrorCode(null); }}
-        initialErrorCode={authErrorCode}
-      />
+      <Suspense fallback={null}>
+        <LoginModal
+          isOpen={isAuthModalOpen}
+          onClose={() => { setIsAuthModalOpen(false); setAuthErrorCode(null); }}
+          initialErrorCode={authErrorCode}
+        />
+      </Suspense>
     </>
   );
 }
