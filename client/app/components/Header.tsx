@@ -34,11 +34,16 @@ export default function Header() {
 
     return (
         <header className="flex items-center justify-between px-6 py-2"
-            style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#0e0f10' }}>
+            style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: '#010003' }}>
 
             {/* Left — breadcrumb / page title */}
             <div className="flex items-center gap-2">
-                <span className="text-xs text-white/25 tracking-widest uppercase">OmniMind</span>
+                {/* <img
+                    src="/images/omnimind_logo.png"
+                    alt="OmniMind"
+                    className="w-30  object-contain opacity-80"
+                    style={{ imageRendering: 'pixelated' }}
+                /> */}
                 {chatTitle && (
                     <>
                         <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
@@ -79,7 +84,7 @@ export default function Header() {
                     {/* Dropdown */}
                     {menuOpen && (
                         <div className="absolute right-0 top-full mt-2 w-48 rounded-xl overflow-hidden z-50"
-                            style={{ background: '#1a1b1d', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            style={{ background: '#0b0410', border: '1px solid rgba(255,255,255,0.08)' }}>
                             <div className="px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                                 <p className="text-xs text-white/70 font-medium truncate">{session?.user?.name ?? 'User'}</p>
                                 <p className="text-[10px] text-white/30 truncate mt-0.5">{session?.user?.email ?? ''}</p>

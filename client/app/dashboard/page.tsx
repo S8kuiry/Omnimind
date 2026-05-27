@@ -15,7 +15,7 @@ export default function DashboardPage() {
   // brief blank while redirecting — keep it dark, matches your theme
   return (
     <div className="flex-1 flex items-center justify-center h-screen"
-      style={{ background: '#0e0f10' }}>
+      style={{ background: '#010003' }}>
       <div className="flex gap-1.5">
         {[0, 1, 2].map(i => (
           <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse"

@@ -257,7 +257,7 @@ injectUserMessage(labelMap[type])
 
   // don't render until session is ready
   if (!userId) return (
-    <div className="flex-1 flex items-center justify-center h-screen" style={{ background: '#0e0f10' }}>
+    <div className="flex-1 flex items-center justify-center h-screen" style={{ background: '#010003' }}>
       <div className="flex gap-1.5">
         {[0, 1, 2].map(i => (
           <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse"
@@ -270,7 +270,7 @@ injectUserMessage(labelMap[type])
   return (
     <div
       className={`flex-1 overflow-hidden flex h-screen  ${sourcePanel ? 'flex-row' : 'flex-col '} items-center justify-center` }
-      style={{ background: '#0e0f10' }}
+      style={{ background: '#010003' }}
     >
       <div
         className={`flex flex-col min-w-0 h-full  ${sourcePanel ? 'w-[58%] shrink-0' : 'w-[75%]'}`}

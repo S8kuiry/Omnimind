@@ -347,7 +347,7 @@ export default function MarkdownBody({
 
   return (
     <div
-      className="min-w-0 max-w-full text-[15px] leading-[1.7] break-words [overflow-wrap:anywhere] [&_li>p]:mb-1 [&_li>p:last-child]:mb-0 [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&_pre]:max-w-full [&_table_td:first-child]:font-medium [&_table_td:first-child]:text-white/90 [&_h2+ul]:mt-2 [&_h3+ul]:mt-1.5 [&_blockquote]:my-4"
+      className="min-w-0 max-w-full text-[15px] leading-[1.7] break-words [&_p]:[overflow-wrap:anywhere] [&_li]:[overflow-wrap:anywhere] [&_li>p]:mb-1 [&_li>p:last-child]:mb-0 [&_li_ul]:mt-1.5 [&_li_ol]:mt-1.5 [&>*:first-child]:mt-0 [&_pre]:max-w-full [&_pre]:break-normal [&_pre]:[overflow-wrap:normal] [&_pre_code]:break-normal [&_pre_code]:[overflow-wrap:normal] [&_pre_code]:whitespace-pre [&_table_td:first-child]:font-medium [&_table_td:first-child]:text-white/90 [&_h2+ul]:mt-2 [&_h3+ul]:mt-1.5 [&_blockquote]:my-4"
       style={BODY_STYLE}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>

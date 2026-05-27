@@ -29,13 +29,21 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
   const textareaRef = useRef<HTMLTextAreaElement>(null) // Ref for responsive text sizing
   const [dropDownOpen, setDropDownOpen] = useState(false)
 
-  const AVAILABLE_MODELS = [
-    { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B (Fast - 14.4k Req/day)" },
-    { id: "qwen/qwen3-32b", name: "Qwen 3 32B (Smart & High Volume - 14.4k Req/day)" },
-    { id: "allam-2-7b", name: "ALLAM 2 7B (Arabic Specialized - 7k Req/day)" },
-    { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B (Max Reasoning - 1k Req/day)" },
+  // const AVAILABLE_MODELS = [
+  //   { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B (Fast - 14.4k Req/day)" },
+  //   { id: "qwen/qwen3-32b", name: "Qwen 3 32B (Smart & High Volume - 14.4k Req/day)" },
+  //   { id: "allam-2-7b", name: "ALLAM 2 7B (Arabic Specialized - 7k Req/day)" },
+  //   { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B (Max Reasoning - 1k Req/day)" },
 
-  ];
+  // ];
+  const AVAILABLE_MODELS = [
+    { "id": "qwen/qwen3-32b",                  "name": "Qwen3 32B  — Smart (default)" },
+    { "id": "llama-3.3-70b-versatile",          "name": "Llama 3.3 70B — Powerful" },
+    { "id": "qwen-qwq-32b",                     "name": "QwQ 32B — Deep Reasoning" },
+    { "id": "deepseek-r1-distill-qwen-32b",     "name": "DeepSeek R1 — Research" },
+    { "id": "llama-3.1-8b-instant",             "name": "Llama 3.1 8B — Fast" },
+]
+
 
   // Auto-scroll mechanics when messages update
   useEffect(() => {

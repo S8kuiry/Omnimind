@@ -69,7 +69,7 @@ export function useStream(
   userId: string,
   chatId: string,
   initialMessages: Message[] = [],
-  model: string = 'llama-3.1-8b-instant',
+  model: string = 'qwen/qwen3-32b',
   documentNames: string[] = [],
 ) {
   console.log('chat-id : ', chatId)

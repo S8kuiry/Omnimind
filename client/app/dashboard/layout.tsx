@@ -3,7 +3,7 @@ import Sidebar from "../components/Sidebar";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     return (
-        <div className="fixed inset-0  flex w-full min-h-screen overflow-hidden bg-[#141516]  hide-scrollbar">
+        <div className="fixed inset-0 flex w-full min-h-screen overflow-hidden bg-[#010003] hide-scrollbar">
             <Sidebar />
             <div className="flex flex-1 flex-col overflow-hidden">
                 <Header />

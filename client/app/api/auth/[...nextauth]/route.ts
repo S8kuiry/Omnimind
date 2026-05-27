@@ -127,7 +127,8 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
-  pages: { signIn: '/dashboard', error: '/' }
+  // Keep signIn on a public route; middleware protects /dashboard/*
+  pages: { signIn: '/', error: '/' }
 };
 
 const handler = NextAuth(authOptions);

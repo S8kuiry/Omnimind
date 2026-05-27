@@ -25,10 +25,10 @@ GROQ_MODEL         = "llama-3.1-8b-instant"
 ALLOWED_MODELS = {
     "llama-3.1-8b-instant",
     "qwen/qwen3-32b",
-    "allam-2-7b",
-    "openai/gpt-oss-120b",
+    "deepseek-r1-distill-qwen-32b",
+    "qwen-qwq-32b",
     # 2. State-of-the-Art Mixture of Experts (Massive context extraction & logic)
-    "meta-llama/llama-4-scout-17b-16e-instruct",
+    "llama-3.3-70b-versatile",
 }
 
 CHUNK_SIZE         = int(os.getenv("CHUNK_SIZE", "1000"))

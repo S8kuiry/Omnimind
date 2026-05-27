@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { v4 as uuidv4 } from 'uuid'
+import { Layers, Terminal } from 'lucide-react'
 
 interface ChatMeta {
   chatId: string
@@ -108,7 +109,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
       style={{
         width: collapsed ? '64px' : '220px',
         minWidth: collapsed ? '64px' : '220px',
-        background: '#0e0f10',
+        background: '#010003',
         borderColor: 'rgba(255,255,255,0.06)',
       }}
     >
@@ -117,12 +118,14 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
         style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center"
           style={{ background: 'rgba(210,140,160,0.2)', border: '1px solid rgba(210,140,160,0.3)' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-              stroke="rgba(210,140,160,0.9)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        {!collapsed && <span className="text-white font-semibold text-sm tracking-wide">OmniMind</span>}
+<Layers className="w-2.5 h-2.5 text-white/70 stroke-[1.5]" />        </div>
+        {!collapsed && (
+          <img
+            src="/images/omnimind_logo.png"
+            alt="OmniMind"
+            className="ml-3 h-4 w-auto object-contain opacity-90"
+          />
+        )}
       </div>
 
       {/* New Chat */}
@@ -300,7 +303,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
       {/* Collapse toggle */}
       <button onClick={() => setCollapsed(!collapsed)}
         className="absolute -right-3 top-6 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-150"
-        style={{ background: '#1a1b1d', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)' }}
+        style={{ background: '#0b0410', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)' }}
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           {collapsed

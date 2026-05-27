@@ -1,32 +1,51 @@
 'use client'
 
-
-import { Suspense, useEffect, useRef } from "react";
-import Login from "./components/Login";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import LoginModal from "./components/Login";
+import { useSession, signOut } from "next-auth/react";
 
-function SearchParamsHandler() {
+function SearchParamsHandler({ onAuthError }: { onAuthError: (code: string) => void }) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  
   useEffect(() => {
     const error = searchParams.get("error");
-
-    if (error === "ALREADY_EXISTS_WITH_EMAIL") {
-      toast.error("This email is registered via OTP. Please login with Email.");
-      router.replace("/");
-    } else if (error === "ALREADY_EXISTS_WITH_GOOGLE") {
-      toast.error("This email is registered via Google. Please login with Google.");
-      router.replace("/");
-    }
+    if (!error) return;
+    onAuthError(error);
+    router.replace("/");
   }, [searchParams, router]);
-
   return null;
 }
 
 export default function HomePage() {
   const sceneRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const router = useRouter();
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authErrorCode, setAuthErrorCode] = useState<string | null>(null);
+  const { data: session } = useSession();
+  const isLoggedIn = !!session?.user;
+  const userEmail = session?.user?.email ?? "user@node.cse";
+
+  const handleLogin = () => {
+    setIsAuthModalOpen(true); 
+  };
+  
+  const handleLaunchApp = () => {
+    if (isLoggedIn) {
+      router.push("/dashboard");
+    } else {
+      setIsAuthModalOpen(true); // Open frame immediately if not authenticated
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut({ callbackUrl: "/" });
+  };
 
   const starPositions: [number, number][] = [
     [6, 14], [14, 7], [28, 11], [42, 6], [55, 16], [63, 10],
@@ -38,193 +57,315 @@ export default function HomePage() {
     [15, 91], [35, 88], [52, 93], [69, 86], [82, 90],
   ];
 
+  // ── Stars ───────────────────────────────────────────────────────
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-
     const created: HTMLDivElement[] = [];
-    const timers: ReturnType<typeof setTimeout>[] = [];
-
-    // ── Stars ──
     starPositions.forEach(([xp, yp]) => {
       const s = document.createElement("div");
       const r = 0.6 + Math.random() * 1.2;
       s.style.cssText = `
-        position:absolute;
-        border-radius:50%;
-        background:#fff;
+        position:absolute;border-radius:50%;background:#fff;
         left:${xp}%;top:${yp}%;
         width:${r}px;height:${r}px;
-        opacity:${0.15 + Math.random() * 0.6};
+        opacity:${0.12 + Math.random() * 0.5};
         animation:twinkle ${2 + Math.random() * 3}s ease-in-out infinite;
         animation-delay:${Math.random() * 4}s;
       `;
       scene.appendChild(s);
       created.push(s);
     });
+    return () => created.forEach(el => el.remove());
+  }, []);
 
-    // ── Petals ──
-    function makePetal() {
-      if (!scene) return;
-      const p = document.createElement("div");
+  // ── Pixel block rain ────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const c = canvas;
+    const g = ctx;
 
-      const xp = 5 + Math.random() * 90;
-      const size = 7 + Math.random() * 18;
-      const dx = (-70 + Math.random() * 140) + "px";
-      const rot = (180 + Math.random() * 360) + "deg";
-      const dur = 7 + Math.random() * 9;
-      const delay = Math.random() * 6;
-      const op = 0.2 + Math.random() * 0.55;
-      const sc = 0.7 + Math.random() * 1.0;
-      const hue = 335 + Math.random() * 25;
-      const sat = 35 + Math.random() * 35;
-      const lit = 58 + Math.random() * 22;
+    const resize = () => {
+      c.width = window.innerWidth;
+      c.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener("resize", resize);
 
-      p.style.cssText = `
-        position:absolute;
-        border-radius:50% 0 50% 0;
-        opacity:0;
-        animation:drift linear infinite;
-        left:${xp}%;top:-40px;
-        width:${size}px;height:${size * 0.55}px;
-        background:hsl(${hue},${sat}%,${lit}%);
-        --op:${op};--dx:${dx};--rot:${rot};--sc:${sc};
-        animation-duration:${dur}s;
-        animation-delay:${delay}s;
-        filter:blur(${Math.random() < 0.25 ? 0.6 : 0}px);
-      `;
+    const STYLES = [
+      { br: 255, bg: 255, bb: 255, ba: 0.85, fr: 255, fg: 255, fb: 255, fa: 0.06 },
+      { br: 255, bg: 255, bb: 255, ba: 0.65, fr: 255, fg: 255, fb: 255, fa: 0.04 },
+      { br: 255, bg: 90,  bb: 150, ba: 0.90, fr: 255, fg: 90,  fb: 150, fa: 0.10 }, 
+      { br: 255, bg: 120, bb: 180, ba: 0.78, fr: 255, fg: 120, fb: 180, fa: 0.08 }, 
+      { br: 236, bg: 72,  bb: 153, ba: 0.82, fr: 236, fg: 72,  fb: 153, fa: 0.09 }, 
+      { br: 244, bg: 63,  bb: 94,  ba: 0.78, fr: 244, fg: 63,  fb: 94,  fa: 0.08 }, 
+      { br: 220, bg: 38,  bb: 38,  ba: 0.70, fr: 220, fg: 38,  fb: 38,  fa: 0.07 }, 
+    ];
 
-      scene.appendChild(p);
-      const t = setTimeout(() => p.remove(), (dur + delay) * 1000 + 800);
-      timers.push(t);
+    const SIZES = [2, 2, 4, 4, 5, 6, 7, 8, 9, 10];
+    const borderW = (sz: number) => Math.max(1, Math.round(sz * 0.12));
+
+    type Pixel = {
+      x: number; y: number;
+      vx: number; vy: number;
+      size: number;
+      style: typeof STYLES[0];
+      alpha: number;
+      bounces: number; maxBounces: number;
+      settled: boolean;
+      settleFrames: number;
+      alive: boolean;
+    };
+
+    const pool: Pixel[] = [];
+
+    function spawn(fromTop = true): Pixel {
+      const sz  = SIZES[Math.floor(Math.random() * SIZES.length)];
+      const st  = STYLES[Math.floor(Math.random() * STYLES.length)];
+      return {
+        x: Math.random() * c.width,
+        y: fromTop
+          ? -sz - Math.random() * 150
+          : Math.random() * (c.height - sz),
+        vx: (Math.random() - 0.5) * 1.6,
+        vy: fromTop ? 1.0 + Math.random() * 2.5 : Math.random() * 2.0,
+        size: sz,
+        style: st,
+        alpha: 1,
+        bounces: 0,
+        maxBounces: 2 + Math.floor(Math.random() * 4),
+        settled: false,
+        settleFrames: 45 + Math.floor(Math.random() * 80),
+        alive: true,
+      };
     }
 
-    // Initial burst + steady flow
-    for (let i = 0; i < 30; i++) {
-      const t = setTimeout(makePetal, i * 250);
-      timers.push(t);
+    for (let i = 0; i < 60; i++) pool.push(spawn(false));
+
+    let frame = 0;
+    let raf: number;
+
+    function drawBlock(p: Pixel) {
+      const sz = p.size;
+      const px = Math.round(p.x);
+      const py = Math.round(p.y);
+      const bw = borderW(sz);
+      const { br, bg, bb, ba, fr, fg, fb, fa } = p.style;
+      const a = p.alpha;
+
+      g.fillStyle = `rgba(${fr},${fg},${fb},${fa * a})`;
+      g.fillRect(px, py, sz, sz);
+
+      g.fillStyle = `rgba(${br},${bg},${bb},${ba * a})`;
+      g.fillRect(px,            py,            sz, bw);        
+      g.fillRect(px,            py + sz - bw,  sz, bw);        
+      g.fillRect(px,            py + bw,       bw, sz - bw*2); 
+      g.fillRect(px + sz - bw,  py + bw,       bw, sz - bw*2); 
     }
-    const interval = setInterval(makePetal, 380);
+
+    function tick() {
+      raf = requestAnimationFrame(tick);
+      frame++;
+
+      if (frame % 22 === 0) {
+        for (let n = 0; n < 3; n++) pool.push(spawn(true));
+      }
+
+      g.clearRect(0, 0, c.width, c.height);
+
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const p = pool[i];
+        if (!p.alive) { pool.splice(i, 1); continue; }
+
+        if (!p.settled) {
+          p.vy += 0.055;   
+          p.vy *= 0.998;
+          p.vx *= 0.994;
+          p.x  += p.vx;
+          p.y  += p.vy;
+
+          const floor = c.height - p.size;
+
+          if (p.y >= floor) {
+            p.y  = floor;                                      
+            p.vy *= -(0.20 + Math.random() * 0.25);          
+            p.vx *= (0.55 + Math.random() * 0.25);
+            p.bounces++;
+
+            if (p.bounces >= p.maxBounces || Math.abs(p.vy) < 0.4) {
+              p.y      = floor;                               
+              p.settled = true;
+            }
+          }
+
+          if (p.x < -40 || p.x > c.width + 40) {
+            p.alive = false; continue;
+          }
+        } else {
+          p.settleFrames--;
+          if (p.settleFrames <= 0) {
+            p.alpha -= 0.016;
+            if (p.alpha <= 0) { p.alive = false; continue; }
+          }
+        }
+
+        drawBlock(p);
+      }
+    }
+
+    tick();
 
     return () => {
-      created.forEach((el) => el.remove());
-      timers.forEach(clearTimeout);
-      clearInterval(interval);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
     };
   }, []);
 
+  // ── Action Handlers ──────────────────────────────────────────────
+  // (logout handler defined above using NextAuth signOut)
+
+ 
+
   return (
     <>
-      <Suspense fallback={null}>
-        <SearchParamsHandler />
-      </Suspense>
       <style>{`
-  /* Hide scrollbars for the entire page while this component is mounted */
-  html, body {
-    overflow: hidden !important;
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none;  /* IE and Edge */
-  }
+        html, body {
+          overflow: hidden !important;
+          height: 100%;
+          margin: 0; padding: 0;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+          background-color: #010003;
+        }
+        html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 
-  html::-webkit-scrollbar, 
-  body::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, and Opera */
-  }
+        @keyframes twinkle {
+          0%, 100% { opacity: 0.15; }
+          50%       { opacity: 0.75; }
+        }
 
-  @keyframes drift {
-    0%   { transform: translateY(-60px) translateX(0px) rotate(0deg) scale(0.4); opacity: 0; }
-    8%   { opacity: var(--op); }
-    85%  { opacity: var(--op); }
-    100% { transform: translateY(110vh) translateX(var(--dx)) rotate(var(--rot)) scale(var(--sc)); opacity: 0; }
-  }
-  @keyframes twinkle {
-    0%, 100% { opacity: 0.2; }
-    50%       { opacity: 0.9; }
-  }
+        .ambient-glow {
+          position: absolute;
+          width: 55vw; height: 55vw;
+          background: radial-gradient(circle, rgba(244,63,94,0.06) 0%, transparent 70%);
+          top: 50%; left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 1;
+          filter: blur(140px);
+          pointer-events: none;
+        }
+      `}</style>
 
-  .hero-glow {
-        position: absolute;
-        width: 40vw;
-        height: 40vw;
-        background: radial-gradient(circle, rgba(210,140,160,0.15) 0%, transparent 70%);
-        top: 20%;
-        left: 10%;
-        z-index: 5;
-        filter: blur(80px);
-        pointer-events: none;
-      }
-`}</style>
+      <Suspense fallback={null}>
+        <SearchParamsHandler onAuthError={(code) => { setAuthErrorCode(code); setIsAuthModalOpen(true); }} />
+      </Suspense>
 
-<div
-      ref={sceneRef}
-      className="relative w-screen h-screen bg-[#020005] overflow-hidden"
-      style={{ fontFamily: "'Geist Sans', sans-serif" }}
-    >
-      <div className="hero-glow" />
+      <div 
+        ref={sceneRef}
+        className="relative w-screen h-screen bg-[#010003] overflow-hidden select-none"
+        style={{ fontFamily: "'Courier New', Courier, monospace" }}
+      >
+        {/* Falling Blocks Canvas Layer */}
+        <canvas 
+          ref={canvasRef} 
+          className="absolute inset-0 pointer-events-none z-10"
+        />
 
-      {/* Nav - Minimalist */}
-      <nav className="absolute top-0 w-full flex justify-between items-center px-12 py-8 z-50">
-        <div className="text-xl tracking-[0.2em] font-light text-white/90">
-          Omni<span className="font-bold text-[rgba(210,140,160,0.9)]">Mind</span>
-        </div>
-        <div className="flex gap-8 items-center">
-           {/* <button className="text-[10px] uppercase tracking-widest text-white/40 hover:text-white transition-colors">Documentation</button>
-           <button className="bg-white/5 border border-white/10 px-5 py-2 rounded-full text-[10px] uppercase tracking-widest text-white hover:bg-white/10 transition-all">
-             GitHub
-           </button> */}
-        </div>
-      </nav>
+        <div className="ambient-glow" />
 
-      {/* Main Content Container */}
-      <main className="relative z-20 h-full w-full max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-2 items-center px-12">
-        
-        {/* Left Side: The Narrative */}
-        <div className="flex flex-col space-y-8">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[rgba(210,140,160,0.3)] bg-[rgba(210,140,160,0.05)]">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[rgba(210,140,160,0.6)] opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-[rgba(210,140,160,0.9)]"></span>
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-[rgba(210,140,160,0.9)]">CodeSense v2.0 Live</span>
+        {/* ── Conversional Tech Navigation Header ──────────────────── */}
+        <header className="absolute top-0 left-0 w-full z-30 px-6 py-4 flex items-center justify-between border-b border-neutral-900 bg-[#010003]/60 backdrop-blur-md">
+          {/* Left Side: App Action Nodes */}
+          <div className="flex items-center space-x-6 text-[11px] font-mono tracking-wider">
+            <div className="hidden md:flex items-center space-x-2 text-neutral-400 uppercase">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+              <span>sys_status // operational</span>
             </div>
             
-            <h1 className="text-6xl xl:text-8xl font-extralight text-white leading-[0.9] tracking-tighter">
-              Decoding <br />
-              <span className="font-semibold bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-[rgba(210,140,160,0.8)]">
-                Complexity.
-              </span>
-            </h1>
+            {/* Direct Value Link */}
+            <button 
+              onClick={handleLaunchApp}
+              className="cursor-pointer px-4 py-2 border border-rose-500/40 hover:border-rose-400 text-rose-300 bg-rose-500/5 hover:bg-rose-500/10 text-[9px] font-mono tracking-widest uppercase rounded-sm shadow-[0_0_22px_rgba(244,63,94,0.10)] transition-all duration-200"
+            >
+              [ launch_console // start chatting ]
+            </button>
           </div>
 
-          <p className="max-w-md text-lg text-white/50 leading-relaxed font-light">
-            A high-precision RAG engine for the modern engineer. Transform static technical documentation into interactive, code-aware intelligence.
-          </p>
-
-          <div className="flex gap-4 pt-4">
-             <div className="h-[1px] w-12 bg-[rgba(210,140,160,0.5)] self-center" />
-             <span className="text-[11px] uppercase tracking-[0.3em] text-white/30 italic">Built for B.Tech CSE Workflows</span>
+          {/* Right Side: Dynamic Authentication State */}
+          <div className="flex items-center space-x-6 text-[11px] font-mono tracking-wider">
+            {isLoggedIn ? (
+              <>
+                <span className="hidden sm:inline text-neutral-500 lowercase">
+                  ident::{userEmail}
+                </span>
+                <button 
+                  onClick={handleLogout}
+                  className="text-rose-300/80 hover:text-rose-300 uppercase font-semibold transition-colors duration-200"
+                >
+                  [ terminate_session ]
+                </button>
+              </>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="cursor-pointer px-4 py-2 border border-rose-500/40 hover:border-rose-400 text-rose-300 bg-rose-500/5 hover:bg-rose-500/10 text-[9px] font-mono tracking-widest uppercase rounded-sm shadow-[0_0_22px_rgba(244,63,94,0.10)] transition-all duration-200"
+                >
+                [ initialize_auth ]
+              </button>
+            )}
           </div>
-        </div>
+        </header>
 
-        {/* Right Side: The Access Point */}
-        <div className="flex justify-center lg:justify-end">
-          <div className="relative group">
-            {/* Soft pulse behind the login box */}
-            <div className="absolute -inset-1 bg-gradient-to-r from-[rgba(210,140,160,0.2)] to-transparent rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
-            <Suspense fallback={null}>
-              <Login />
-            </Suspense>
+        {/* Unified Absolute Central Centerpiece */}
+        <main className="relative z-20 flex flex-col items-center justify-center h-full w-full max-w-2xl mx-auto px-6 text-center space-y-10">
+          
+          {/* Scaled Central Pixel Logo Object */}
+          <div className="w-full max-w-[330px] sm:max-w-[460px] filter drop-shadow-[0_0_44px_rgba(244,63,94,0.18)] transition-all duration-300">
+            <img 
+              src="/images/omnimind_logo.png" 
+              alt="OmniMind Logo" 
+              className="w-full h-auto object-contain render-pixelated"
+              style={{ imageRendering: 'pixelated' }}
+            />
           </div>
-        </div>
-      </main>
 
-      {/* Decorative Floor */}
-      <div className="absolute bottom-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-    </div>
+          {/* Expanded & Intentional Product Descriptives */}
+          <div className="space-y-4 w-full max-w-[330px] sm:max-w-[460px] pt-2">
+            <p className="text-[12px] font-mono tracking-[0.3em] text-rose-300/80 uppercase">
+              // high-precision rag intelligence engine
+            </p>
+            <p className="max-w-md mx-auto text-[11px] font-mono tracking-wide text-neutral-500 leading-relaxed uppercase">
+              Stop digging through static markdown, logs, and repositories. Turn your codebase and architecture documentation into an active, contextual development partner.
+            </p>
+          </div>
+
+          {/* Explicit Primary Action Layer */}
+          <div className="pt-2">
+            <button
+              onClick={handleLaunchApp}
+              className="cursor-pointer px-6 py-3 border border-rose-500/40 hover:border-rose-400 text-rose-300 bg-rose-500/5 hover:bg-rose-500/10 text-[12px] font-mono tracking-widest uppercase rounded-sm shadow-[0_0_22px_rgba(244,63,94,0.10)] transition-all duration-200"
+            >
+              &gt;_ query_your_docs_now
+            </button>
+          </div>
+
+          {/* Core System Label */}
+          <div className="text-[9px] tracking-[0.4em] text-neutral-600 uppercase pt-6 font-mono">
+            b.tech cse workflow node // v2.0_live
+          </div>
+
+        </main>
+      </div>
+
+
+      <LoginModal
+        isOpen={isAuthModalOpen}
+        onClose={() => { setIsAuthModalOpen(false); setAuthErrorCode(null); }}
+        initialErrorCode={authErrorCode}
+      />
     </>
   );
 }
