@@ -90,22 +90,12 @@ export function buildMarkdownComponents(
     code({ inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '')
       const codeText = String(children).replace(/\n$/, '')
+      const lang = match?.[1]?.toLowerCase()
 
-      if (!inline && match) {
-        if (streamMode) {
-          return (
-            <pre
-              className="my-3 max-w-full overflow-x-auto rounded-lg px-4 py-3 font-mono text-[13px] leading-relaxed"
-              style={{
-                background: 'rgba(0,0,0,0.35)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.88)',
-              }}
-            >
-              <code>{codeText}</code>
-            </pre>
-          )
-        }
+      if (!inline) {
+        // Fenced code blocks should render as blocks even without a language tag.
+        // Keep the same "Claude-like" card UI in streaming mode too,
+        // so code remains readable while tokens arrive.
         return (
           <div
             className="my-4 max-w-full rounded-xl overflow-x-auto"
@@ -124,16 +114,18 @@ export function buildMarkdownComponents(
             >
               <div className="flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '10px' }}>
                 <Terminal size={11} />
-                <span className="uppercase tracking-widest font-mono">{match[1]}</span>
+                <span className="uppercase tracking-widest font-mono">{lang || 'code'}</span>
               </div>
               <div className="flex items-center gap-3">
                 <CopyButton text={codeText} size="xs" />
-                <DownloadButton text={codeText} filename={`code.${match[1]}`} />
+                {!streamMode && (
+                  <DownloadButton text={codeText} filename={`code.${lang || 'txt'}`} />
+                )}
               </div>
             </div>
             <SyntaxHighlighter
               style={atomDark}
-              language={match[1]}
+              language={lang}
               PreTag="div"
               customStyle={{
                 margin: 0,

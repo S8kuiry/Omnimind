@@ -6,6 +6,8 @@ export const CHAT_MODELS = [
   { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B — Powerful' },
   { id: 'qwen-qwq-32b', name: 'QwQ 32B — Deep Reasoning' },
   { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B — Fast' },
+  { id: 'openai/gpt-oss-120b', name: 'GPT OSS 120B — High quality' },
+  { id: 'openai/gpt-oss-20b', name: 'GPT OSS 20B — Balanced' },
 ] as const
 
 export const CHAT_MODEL_IDS = new Set(CHAT_MODELS.map((m) => m.id))

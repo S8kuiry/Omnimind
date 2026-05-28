@@ -23,11 +23,19 @@ HF_EMBEDDING_URL   = f"https://api-inference.huggingface.co/models/{HF_EMBEDDING
 GROQ_MODEL         = "qwen/qwen3-32b"
 
 ALLOWED_MODELS = {
+    # Fast / cheap
     "llama-3.1-8b-instant",
-    "qwen/qwen3-32b",
-    "qwen-qwq-32b",
-    # 2. State-of-the-Art Mixture of Experts (Massive context extraction & logic)
+
+    # Strong general-purpose
     "llama-3.3-70b-versatile",
+    "qwen/qwen3-32b",
+
+    # Reasoning-focused
+    "qwen-qwq-32b",
+
+    # Open-weight "GPT OSS" (listed as production models in Groq docs)
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 }
 
 CHUNK_SIZE         = int(os.getenv("CHUNK_SIZE", "1000"))

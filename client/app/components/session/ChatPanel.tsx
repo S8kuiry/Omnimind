@@ -4,7 +4,7 @@ import type { Message } from '@/lib/useStream'
 import FormattedMessage from '../FormattedMessage'
 import SourceChip from './SourceChip'
 import { ensureSectionSources, hasInlineSectionCitations } from '@/lib/sectionSources'
-import { ArrowDownIcon, Check, Copy } from 'lucide-react'
+import { ArrowDownIcon, Check, Copy, FileText, PencilIcon } from 'lucide-react'
 import { CHAT_MODELS } from '@/lib/models'
 
 export default function ChatPanel({ messages, isStreaming, streamingMessageId, onSend, onUpload, uploading, uploadStatus, onFeature, hasDocs, onRemove, model, setModel, onOpenSource, saveWarning, onDismissSaveWarning }: {
@@ -18,7 +18,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
   uploading: boolean
   uploadStatus?: string | null
   hasDocs: string[]
-  onFeature: (type: 'guidance' | 'analytics' | 'compare') => void
+  onFeature: (type: 'guidance' | 'analytics' | 'compare' | 'edit') => void
   onRemove: (name: string) => void
   onOpenSource?: (docName: string, page: number, snippet?: string, sectionContext?: string) => void
   saveWarning?: string | null
@@ -265,6 +265,13 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
                   >
                     <span>📊</span> Analytics
                   </button>
+                  <button
+                    onClick={() => onFeature('edit')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-wide transition-all border border-[rgba(210,140,160,0.4)] bg-[rgba(210,140,160,0.03)] text-[rgba(210,140,160,0.9)] hover:text-rose-400 hover:bg-[rgba(210,140,160,0.08)] hover:border-[rgba(210,140,160,0.6)] cursor-pointer active:scale-98"
+                  >
+            <FileText size={13} style={{ color: 'rgba(210,140,160,0.6)', flexShrink: 0 }} />
+            Open File
+                  </button>
                 </>
               )}
               {hasDocs.length >= 2 && (
@@ -287,7 +294,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
 
             {/* File Attachment Action */}
             <div className="flex items-center h-10">
-              <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFileChange} />
+              <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={handleFileChange} />
               <button
                 onClick={openFilePicker}
                 disabled={uploading}

@@ -171,7 +171,20 @@ export default function ChatPage() {
 
 
   {/** feature handle  */ }
- const handleFeature = async (type: 'guidance' | 'analytics' | 'compare') => {
+ const handleFeature = async (type: 'guidance' | 'analytics' | 'compare' | 'edit') => {
+
+
+  if (type === 'edit') {
+    setSourcePanel({
+      docName: docNames[0],
+      page: 1,
+      snippet: undefined,
+      sectionContext: undefined,
+    })
+    return
+  }
+
+
   if (featureLoading) return
   setFeatureLoading(true)
 
@@ -179,7 +192,10 @@ export default function ChatPage() {
     guidance: '🧭 Generate document guidance',
     analytics: '📊 Analyse this document',
     compare: '⚖️ Compare documents',
+    edit: '✏️ Edit this document',
   }
+
+  
 
   // ✅ inject visible user message
   const userMsg: Message = {

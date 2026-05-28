@@ -102,13 +102,145 @@ function enforceNoStrayFormattingTokens(s: string): string {
   // This is intentionally conservative: only strips when "**" immediately follows a word/number.
   t = t.replace(/([A-Za-z0-9])\*\*(?=\s|[.,;:!?)]|$)/g, '$1')
 
-  // User requirement: do not show bold markers at all
-  t = t.replace(/\*\*/g, '')
-
   // User requirement: strip broken pipe+dash artifacts like "| - **Tools:**"
   t = t.replace(/\|\s*-\s*/g, '')
 
   return t
+}
+
+type ProtectedBlocks = {
+  text: string
+  blocks: string[]
+}
+
+/**
+ * Protect fenced/inline code from markdown "repair" passes.
+ * Many regex-based fixes are great for prose, but they can corrupt
+ * code blocks produced by LLMs (especially when they contain `**`, `|`,
+ * or unusual spacing).
+ */
+function protectCodeBlocks(input: string): ProtectedBlocks {
+  let s = input
+  const blocks: string[] = []
+
+  // 1) Fenced code blocks ```...```
+  s = s.replace(/```[\s\S]*?```/g, (m: string) => {
+    const id = blocks.length
+    blocks.push(m)
+    return `@@OMNI_CODEBLOCK_${id}@@`
+  })
+
+  // 1b) Incomplete fenced block (common while streaming):
+  // If there's an unmatched ``` left, protect from the last fence to end.
+  const fenceCount = (s.match(/```/g) || []).length
+  if (fenceCount % 2 === 1) {
+    const last = s.lastIndexOf('```')
+    if (last >= 0) {
+      const tail = s.slice(last)
+      const id = blocks.length
+      blocks.push(tail)
+      s = s.slice(0, last) + `@@OMNI_CODEBLOCK_${id}@@`
+    }
+  }
+
+  // 2) Inline code `...` (keep it single-line)
+  s = s.replace(/`[^`\n]+`/g, (m: string) => {
+    const id = blocks.length
+    blocks.push(m)
+    return `@@OMNI_CODEBLOCK_${id}@@`
+  })
+
+  return { text: s, blocks }
+}
+
+function restoreCodeBlocks(input: string, blocks: string[]): string {
+  let s = input
+  for (let i = 0; i < blocks.length; i++) {
+    s = s.replaceAll(`@@OMNI_CODEBLOCK_${i}@@`, blocks[i])
+  }
+  return s
+}
+
+function looksLikeLetter(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ').trim().toLowerCase()
+  if (t.length < 180) return false
+  const hasGreeting =
+    // Dear [Recipient], Dear Sir/Madam, Dear John,
+    /\bdear\s+\[[^\]\n]{2,40}\]/i.test(text) ||
+    /\bdear\s+[A-Za-z][A-Za-z.\- ]{1,40},/i.test(text) ||
+    /\bdear\s+(sir|madam|principal|hod|prof|manager)\b/i.test(text)
+  const hasSubject = /\bsubject\s*:/i.test(text) || /\bsub\s*:/i.test(text)
+  const hasClosing =
+    /\bbest regards\b/i.test(text) ||
+    /\bregards\b/i.test(text) ||
+    /\bsincerely\b/i.test(text) ||
+    /\bthank you\b/i.test(text)
+  return (hasGreeting && hasSubject) || (hasGreeting && hasClosing) || (hasSubject && hasClosing)
+}
+
+/**
+ * Format jammed formal letters into readable paragraphs.
+ * Intentionally conservative and only triggers when text looks like a letter.
+ */
+function formatLetterLikeProse(s: string): string {
+  if (!looksLikeLetter(s)) return s
+  let t = s
+
+  // If a heading is glued to "Dear ..." (common LLM output), split it.
+  // Example: "## Request ... (No C)Dear [Recipient],I am writing..."
+  t = t.replace(/^(#{1,6}[^\n]{8,240}?)(Dear\b)/gm, '$1\n\n$2')
+  // If "Dear" starts immediately after heading text without a space.
+  t = t.replace(/(#{1,6}[^\n]{8,240}?)\s*(Dear\b)/g, '$1\n\n$2')
+
+  // Ensure Subject starts on its own line
+  t = t.replace(/,\s*(subject\s*:)/gi, ',\n\n$1')
+  t = t.replace(/(dear[^\n]{2,80}?),\s*(subject\s*:)/gi, '$1,\n\n$2')
+
+  // If the greeting is glued to the first sentence, break after the comma.
+  t = t.replace(/(Dear[^\n]{2,80}?),\s*(I am writing|I’m writing|This is to|With reference|Regarding)\b/g, '$1,\n\n$2')
+  // If comma is missing: "Dear [Recipient] I am writing..." or "Dear [Recipient],I am..."
+  t = t.replace(/(Dear[^\n]{2,80}\])\s*(I am writing|I’m writing|This is to|With reference|Regarding)\b/g, '$1,\n\n$2')
+  t = t.replace(/(Dear[^\n]{2,80}),\s*(I am writing|I’m writing|This is to|With reference|Regarding)\b/g, '$1,\n\n$2')
+
+  // Add a newline after Subject line if it's glued to the body
+  t = t.replace(
+    /(subject\s*:[^\n]{4,140})(\s+)(i am|this is|with reference|respectfully|i hereby)\b/gi,
+    '$1\n\n$3',
+  )
+
+  // Paragraph breaks before common transition phrases (handle missing space after punctuation too)
+  t = t.replace(/([.?!])\s*(During my internship,)\b/g, '$1\n\n$2')
+  t = t.replace(/\s+(During my internship,)\b/g, '\n\n$1')
+  t = t.replace(
+    /\s+(I believe that|I believe this|I request you to|I would greatly appreciate|I would appreciate|I am pleased to inform you that)\b/g,
+    '\n\n$1',
+  )
+  t = t.replace(/([.?!])\s*(Thank you for your time and consideration\.)/gi, '$1\n\n$2')
+  t = t.replace(/\s+(Thank you for your time and consideration\.)/gi, '\n\n$1')
+  t = t.replace(/([.?!])\s*(Thank you for considering my request\.)/gi, '$1\n\n$2')
+  t = t.replace(/\s+(Thank you for considering my request\.)/gi, '\n\n$1')
+
+  // Closing and signature blocks
+  t = t.replace(/([.?!])\s*(Best regards,?)/gi, '$1\n\n$2')
+  t = t.replace(/([.?!])\s*(Sincerely,?)/gi, '$1\n\n$2')
+  t = t.replace(/([.?!])\s*(Yours faithfully,?)/gi, '$1\n\n$2')
+  t = t.replace(/\s+(Best regards,?)\s*/gi, '\n\n$1\n')
+  t = t.replace(/\s+(Sincerely,?)\s*/gi, '\n\n$1\n')
+  t = t.replace(/\s+(Yours faithfully,?)\s*/gi, '\n\n$1\n')
+
+  // Fix missing spaces after "on" + date (on19th → on 19th)
+  t = t.replace(/\bon(\d{1,2}(st|nd|rd|th)\b)/gi, 'on $1')
+  t = t.replace(/\bon(\d{1,2}\s+[A-Za-z]+\b)/gi, 'on $1')
+  t = t.replace(/\btill(\d{1,2}(st|nd|rd|th)\b)/gi, 'till $1')
+  t = t.replace(/\btill(\d{1,2}\s+[A-Za-z]+\b)/gi, 'till $1')
+
+  // Ensure "Subject:" is consistently capitalized
+  t = t.replace(/\bsubject\s*:/gi, 'Subject:')
+
+  // Clean excessive whitespace
+  t = t.replace(/[ \t]+$/gm, '')
+  t = t.replace(/\n{3,}/g, '\n\n')
+  return t.trim()
 }
 
 /**
@@ -915,9 +1047,12 @@ function stripFillerIntros(s: string): string {
 
 export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): string {
   let s = stripReasoningBlocks(raw)
+  const protected0 = protectCodeBlocks(s)
+  s = protected0.text
   s = repairUniversalModelMarkdown(s)
   s = stripFillerIntros(s)
   s = stripHtmlToMarkdown(s)
+  s = formatLetterLikeProse(s)
   s = s.replace(/\[Source:[^\]]*\]/gi, '')
   s = s.replace(/^\s*#{1,3}\s*$/gm, '')
   s = s.replace(/([^\n])\n(#{1,3}\s)/g, '$1\n\n$2')
@@ -1011,5 +1146,6 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
     s = stripIncompleteTableTail(s)
   }
 
+  s = restoreCodeBlocks(s, protected0.blocks)
   return s.trim()
 }
