@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from services.document_parser import extract_text_from_pdf
+from services.document_parser import extract_text_from_document
 from services.chunker import chunk_pages
 from services.embedder import embed_texts, embed_query, warmup_local_embeddings
 from services.vector_store import (
@@ -118,7 +118,7 @@ def _index_pdf(file_bytes: bytes, doc_name: str, scope: str, job_id: str, filena
         UPLOAD_JOBS[job_id] = {**UPLOAD_JOBS.get(job_id, {}), "status": "parsing"}
         pages = extract_text_from_document(file_bytes, filename)
         if not pages:
-            UPLOAD_JOBS[job_id] = {"status": "error", "error": "Could not extract text from PDF."}
+            UPLOAD_JOBS[job_id] = {"status": "error", "error": "Could not extract text from the document."}
             return
 
         UPLOAD_JOBS[job_id]["status"] = "embedding"
