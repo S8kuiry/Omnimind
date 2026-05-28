@@ -1,5 +1,4 @@
-import fitz           # PyMuPDF  — for PDF
-from docx import Document  # python-docx — for DOCX
+import fitz  # PyMuPDF  — for PDF
 import io
 
 # ── PDF ────────────────────────────────────────────────────────────
@@ -34,6 +33,14 @@ def extract_text_from_docx(file_bytes: bytes, paragraphs_per_page: int = 15) -> 
 
     Returns: [{ "page": int, "text": str }, ...]
     """
+    try:
+        from docx import Document  # python-docx
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Missing dependency for DOCX support. Install `python-docx` in the same "
+            "environment that runs the FastAPI server."
+        ) from exc
+
     doc = Document(io.BytesIO(file_bytes))
 
     # collect non-empty paragraphs
