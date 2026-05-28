@@ -25,7 +25,6 @@ GROQ_MODEL         = "qwen/qwen3-32b"
 ALLOWED_MODELS = {
     "llama-3.1-8b-instant",
     "qwen/qwen3-32b",
-    "deepseek-r1-distill-qwen-32b",
     "qwen-qwq-32b",
     # 2. State-of-the-Art Mixture of Experts (Massive context extraction & logic)
     "llama-3.3-70b-versatile",

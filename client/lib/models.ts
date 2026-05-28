@@ -5,7 +5,6 @@ export const CHAT_MODELS = [
   { id: 'qwen/qwen3-32b', name: 'Qwen3 32B — Smart (default)' },
   { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B — Powerful' },
   { id: 'qwen-qwq-32b', name: 'QwQ 32B — Deep Reasoning' },
-  { id: 'deepseek-r1-distill-qwen-32b', name: 'DeepSeek R1 — Research' },
   { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B — Fast' },
 ] as const
 
