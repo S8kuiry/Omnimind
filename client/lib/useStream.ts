@@ -107,7 +107,6 @@ export function useStream(
   model: string = DEFAULT_CHAT_MODEL,
   documentNames: string[] = [],
 ) {
-  console.log('chat-id : ', chatId)
   const [messages, setMessages] = useState<Message[]>(initialMessages) // 👈 accepts history
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)

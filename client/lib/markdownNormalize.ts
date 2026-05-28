@@ -105,6 +105,40 @@ function enforceNoStrayFormattingTokens(s: string): string {
   return t
 }
 
+/**
+ * Make long “letter/resume” paragraphs readable:
+ * - Break `[X][Y]` into separate blocks
+ * - Convert leading `| ... | ... |` contact lines into normal text
+ * - Fix common missing spaces (Next.js15, Java17, NameCity → Name City)
+ */
+function repairJammedProseBlocks(s: string): string {
+  let t = s
+
+  // [Date][Hiring Manager] → on separate lines
+  t = t.replace(/\]\s*\[/g, ']\n[')
+
+  // Lines that start with a pipe and look like contact rows → drop pipes
+  t = t.replace(/^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*$/gm, (_, a, b, c) => {
+    const row = `${String(a).trim()} • ${String(b).trim()} • ${String(c).trim()}`
+    return row.replace(/\s+/g, ' ').trim()
+  })
+
+  // Any remaining leading/trailing pipes that aren’t real tables
+  t = t.replace(/^\|\s*/gm, '')
+  t = t.replace(/\s*\|\s*$/gm, '')
+
+  // Fix common “wordNumber” glue: Next.js15 → Next.js 15, Java17 → Java 17
+  t = t.replace(/([A-Za-z.])(\d{2,4})(?=\b)/g, '$1 $2')
+
+  // Fix glued words: "KuiryKolkata" → "Kuiry Kolkata" (camel-case boundary)
+  t = t.replace(/([a-z])([A-Z])/g, '$1 $2')
+
+  // Phone followed immediately by bracket blocks → new paragraph
+  t = t.replace(/(\+?\d[\d\s-]{7,}\d)\s*(?=\[)/g, '$1\n\n')
+
+  return t
+}
+
 /** Split headings glued to prior text or section numbers: Student###1. or ###2. */
 export function fixGluedHeadings(s: string): string {
   let t = s
@@ -883,6 +917,7 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
   s = s.replace(/([^\n])\n(#{1,3}\s)/g, '$1\n\n$2')
   s = s.replace(/\s*\[Page\s*[\d‑\-–—]+\]/gi, '')
   s = s.replace(/\\n/g, '\n')
+  s = repairJammedProseBlocks(s)
   s = fixGluedHeadings(s)
   s = fixStrayAsterisksAndSubtitles(s)
   s = joinBrokenTableCells(s)

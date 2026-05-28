@@ -58,7 +58,6 @@ export default function ChatPage() {
     saveWarning,
     dismissSaveWarning,
   } = useStream(userId, chatId, [], model, docNames)
-  console.log("userId", userId)
 
   const handleRemove = async (name: string) => {
     if (removingDoc || uploading) return
