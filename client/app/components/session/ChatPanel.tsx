@@ -5,6 +5,7 @@ import FormattedMessage from '../FormattedMessage'
 import SourceChip from './SourceChip'
 import { ensureSectionSources, hasInlineSectionCitations } from '@/lib/sectionSources'
 import { ArrowDownIcon, Check, Copy } from 'lucide-react'
+import { CHAT_MODELS } from '@/lib/models'
 
 export default function ChatPanel({ messages, isStreaming, streamingMessageId, onSend, onUpload, uploading, uploadStatus, onFeature, hasDocs, onRemove, model, setModel, onOpenSource, saveWarning, onDismissSaveWarning }: {
   messages: Message[]
@@ -29,21 +30,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
   const textareaRef = useRef<HTMLTextAreaElement>(null) // Ref for responsive text sizing
   const [dropDownOpen, setDropDownOpen] = useState(false)
 
-  // const AVAILABLE_MODELS = [
-  //   { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B (Fast - 14.4k Req/day)" },
-  //   { id: "qwen/qwen3-32b", name: "Qwen 3 32B (Smart & High Volume - 14.4k Req/day)" },
-  //   { id: "allam-2-7b", name: "ALLAM 2 7B (Arabic Specialized - 7k Req/day)" },
-  //   { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B (Max Reasoning - 1k Req/day)" },
-
-  // ];
-  const AVAILABLE_MODELS = [
-    { "id": "qwen/qwen3-32b",                  "name": "Qwen3 32B  — Smart (default)" },
-    { "id": "llama-3.3-70b-versatile",          "name": "Llama 3.3 70B — Powerful" },
-    { "id": "qwen-qwq-32b",                     "name": "QwQ 32B — Deep Reasoning" },
-    { "id": "deepseek-r1-distill-qwen-32b",     "name": "DeepSeek R1 — Research" },
-    { "id": "llama-3.1-8b-instant",             "name": "Llama 3.1 8B — Fast" },
-]
-
+  const AVAILABLE_MODELS = CHAT_MODELS
 
   // Auto-scroll mechanics when messages update
   useEffect(() => {
@@ -145,10 +132,10 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
                   stroke="rgba(210,140,160,0.9)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>
-              How can I help you?
+            <p className="text-sm font-medium font-mono tracking-wider" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              How can I help you ?
             </p>
-            <p className="text-xs text-center max-w-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            <p className="text-xs font-mono text-center max-w-xs tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>
               Ask anything — or attach a PDF to chat with your document
             </p>
           </div>

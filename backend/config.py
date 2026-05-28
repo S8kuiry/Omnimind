@@ -20,7 +20,7 @@ PINECONE_REGION     = os.getenv("PINECONE_REGION", "us-east-1")
 HF_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 HF_EMBEDDING_URL   = f"https://api-inference.huggingface.co/models/{HF_EMBEDDING_MODEL}"
 
-GROQ_MODEL         = "llama-3.1-8b-instant"
+GROQ_MODEL         = "qwen/qwen3-32b"
 
 ALLOWED_MODELS = {
     "llama-3.1-8b-instant",

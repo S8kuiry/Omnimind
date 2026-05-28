@@ -252,6 +252,42 @@ def get_analytics(chunks: list[dict]) -> str:
     return response.choices[0].message.content
 
 
+def generate_chat_title(first_user_message: str, first_assistant_message: str) -> str:
+    """Generate a short chat title like Claude/Gemini.
+
+    Requirements:
+    - 3 to 7 words
+    - No quotes, no code fences, no markdown bullets
+    - Plain text only
+    """
+    user = (first_user_message or "").strip()
+    assistant = (first_assistant_message or "").strip()
+    prompt = f"""Create a short chat title (3-7 words) for this conversation.
+Return ONLY the title as plain text.
+Do not include quotes, punctuation at the end, markdown, bullets, or code.
+
+User: {user}
+Assistant: {assistant}
+"""
+    response = client.chat.completions.create(
+        # Hard-pin title generation to a fast, stable model
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=24,
+    )
+    title = (response.choices[0].message.content or "").strip()
+    # harden output
+    title = title.replace('"', "").replace("'", "").strip()
+    title = title.splitlines()[0].strip()
+    if not title:
+        return "New Chat"
+    # clamp length
+    if len(title) > 60:
+        title = title[:60].rstrip()
+    return title
+
+
 
 def stream_answer(
     question: str,

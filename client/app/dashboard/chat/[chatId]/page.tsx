@@ -7,11 +7,9 @@ import { uploadPDF, getGuidance, getAnalytics, compareDocuments, deleteDocument,
 import TabBar from '@/app/components/session/TabBar'
 import ChatPanel from '@/app/components/session/ChatPanel'
 import DocumentSourcePanel from '@/app/components/session/DocumentSourcePanel'
+import { DEFAULT_CHAT_MODEL, loadChatModel, saveChatModel } from '@/lib/models'
 
 type Tab = 'chat' | 'guidance' | 'analytics' | 'compare'
-
-const DEFAULT_MODEL = 'llama-3.1-8b-instant'
-const modelStorageKey = (chatId: string) => `omnimind-model-${chatId}`
 
 export default function ChatPage() {
   const { chatId } = useParams<{ chatId: string }>()
@@ -29,7 +27,7 @@ export default function ChatPage() {
   const [guidanceData, setGuidanceData] = useState<any>(null)
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
-  const [model, setModelState] = useState<string>(DEFAULT_MODEL)
+  const [model, setModelState] = useState<string>(DEFAULT_CHAT_MODEL)
   const [sourcePanel, setSourcePanel] = useState<{
     docName: string
     page: number
@@ -40,13 +38,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!chatId) return
-    const saved = sessionStorage.getItem(modelStorageKey(chatId))
-    if (saved) setModelState(saved)
+    setModelState(loadChatModel(chatId))
   }, [chatId])
 
   const setModel = (m: string) => {
     setModelState(m)
-    if (chatId) sessionStorage.setItem(modelStorageKey(chatId), m)
+    if (chatId) saveChatModel(chatId, m)
   }
 
   const {

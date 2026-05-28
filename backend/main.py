@@ -24,8 +24,11 @@ from services.vector_store import (
     _coerce_page,
 )
 from services.llm import (
-     get_guidance,
-    get_comparison, get_analytics, stream_answer
+    get_guidance,
+    get_comparison,
+    get_analytics,
+    stream_answer,
+    generate_chat_title,
 )
 from services.conversation import is_conversational
 from services.citations import build_section_sources
@@ -90,11 +93,22 @@ class CompareRequest(BaseModel):
     doc_b: str
 
 
+class TitleRequest(BaseModel):
+    first_user_message: str
+    first_assistant_message: str
+
+
 # ── Health ─────────────────────────────────────────────────────────
 
 @app.get("/")
 def health():
     return {"status": "OmniMind API running", "version": "2.0.0"}
+
+
+@app.post("/title")
+def title(req: TitleRequest):
+    t = generate_chat_title(req.first_user_message, req.first_assistant_message)
+    return {"title": t}
 
 
 # ── Upload ─────────────────────────────────────────────────────────

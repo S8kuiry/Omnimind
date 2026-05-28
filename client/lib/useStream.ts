@@ -12,6 +12,8 @@ import {
   type ChunkRef,
   type SourceRef,
 } from './sectionSources'
+import { DEFAULT_CHAT_MODEL } from './models'
+import { getApiBase } from './api'
 
 export interface Message {
   id: string
@@ -47,6 +49,39 @@ async function saveMessage(payload: object): Promise<SaveResult> {
     return { ok: false, error: 'Could not reach the server to save this message' }
   }
 }
+
+async function generateAndSaveTitle(
+  chatId: string,
+  userId: string,
+  firstUserMessage: string,
+  firstAssistantMessage: string,
+): Promise<string | null> {
+  try {
+    const base = getApiBase()
+    const res = await fetch(`${base}/title`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        first_user_message: firstUserMessage,
+        first_assistant_message: firstAssistantMessage,
+      }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const title = typeof data?.title === 'string' ? data.title.trim() : ''
+    if (!title || title === 'New Chat') return null
+
+    await fetch(`/api/chat/${chatId}?userId=${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    window.dispatchEvent(new Event('omnimind_chats_updated'))
+    return title
+  } catch {
+    return null
+  }
+}
 function parseInlineCitations(text: string): { source: string; page: number; surroundingText: string }[] {
   const pattern = /\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]/gi
   const results: { source: string; page: number; surroundingText: string }[] = []
@@ -69,7 +104,7 @@ export function useStream(
   userId: string,
   chatId: string,
   initialMessages: Message[] = [],
-  model: string = 'qwen/qwen3-32b',
+  model: string = DEFAULT_CHAT_MODEL,
   documentNames: string[] = [],
 ) {
   console.log('chat-id : ', chatId)
@@ -394,6 +429,11 @@ export function useStream(
       }).then(r => {
         if (!r.ok) setSaveWarning(r.error)
       })
+
+      if (messages.length === 0 && (!title || title === 'New Chat') && chatTitle === 'New Chat') {
+        const t = await generateAndSaveTitle(chatId, userId, question, fullResponse)
+        if (t) setTitle(t)
+      }
 
     } catch (err) {
       console.error('[stream]', err)

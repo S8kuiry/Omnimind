@@ -45,9 +45,18 @@ export async function PATCH(
 
         await dbConnect()
 
+        const userId = new URL(req.url).searchParams.get('userId') || body.userId
+        const set: Record<string, any> = {}
+        if (body?.metadata?.pdfNames) set['metadata.pdfNames'] = body.metadata.pdfNames
+        if (typeof body?.title === 'string' && body.title.trim()) set['title'] = body.title.trim()
+
+        if (!Object.keys(set).length) {
+            return NextResponse.json({ success: true })
+        }
+
         await Chat.findOneAndUpdate(
-            { chatId },
-            { $set: { 'metadata.pdfNames': body.metadata.pdfNames } }
+            userId ? { chatId, userId } : { chatId },
+            { $set: set }
         )
 
         return NextResponse.json({ success: true })

@@ -46,8 +46,8 @@ export default function Header() {
                 /> */}
                 {chatTitle && (
                     <>
-                        <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
-                        <span className="text-xs text-white/50 tracking-wide max-w-[220px] truncate">{chatTitle}</span>
+                        <span style={{ color: 'rgba(255,255,255,0.15)' }}>|</span>
+                        <span className="text-xs font-mono text-white/50 tracking-wider max-w-[220px] truncate">{chatTitle}</span>
                     </>
                 )}
             </div>
@@ -93,7 +93,7 @@ export default function Header() {
                                 {[
                                     { label: 'Profile', icon: '○', href: '/dashboard/profile', },
                                     // { label: 'Billing', icon: '◇' },
-                                    { label: 'Settings', icon: '◈' , href: '/dashboard/settings',},
+                                    // { label: 'Settings', icon: '◈' , href: '/dashboard/settings',},
                                 ].map((item) => (
                                     <Link key={item.label}
                                     href={item.href}

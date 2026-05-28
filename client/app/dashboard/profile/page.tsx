@@ -113,14 +113,14 @@ export default function DashboardPage() {
             {/* Header Section with Clock */}
             <div className="flex items-end justify-between relative">
                 <div className="space-y-1">
-                    <p className="text-xs tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                    <p className="text-xs font-mono tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.25)' }}>
                         {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                     </p>
-                    <h1 className="text-2xl font-light tracking-tight">
+                    <h1 className="text-2xl font-light tracking-wider font-mono">
                         Good {getTimeOfDay()},{' '}
                         <span style={{ color: 'rgba(210,140,160,0.9)' }} className="font-semibold">{firstName}</span>
                     </h1>
-                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    <p className="text-sm font-mono tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
                         Here's what's happening with your workspace today.
                     </p>
                 </div>
@@ -142,10 +142,10 @@ export default function DashboardPage() {
                 {dynamicStats.map((stat) => (
                     <div key={stat.label} className="rounded-xl p-4 space-y-2"
                         style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <p className="text-[10px] uppercase tracking-widest line-clamp-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                        <p className=" font-mono text-[10px] uppercase tracking-widest line-clamp-1" style={{ color: 'rgba(255,255,255,0.3)' }}>
                             {stat.label}
                         </p>
-                        <p className="text-2xl font-light truncate">{stat.value}</p>
+                        <p className="text-2xl font-light truncate font-mono ">{stat.value}</p>
                         <p className="text-[11px]" style={{ color: 'rgba(210,140,160,0.6)' }}>{stat.change}</p>
                     </div>
                 ))}
