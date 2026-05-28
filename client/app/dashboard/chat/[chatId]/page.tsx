@@ -52,6 +52,7 @@ export default function ChatPage() {
     streamingMessageId,
     send,
     loadHistory,
+    setChatTitle,
     injectLoading,
     updateMessage,
     injectUserMessage,
@@ -91,6 +92,15 @@ export default function ChatPage() {
     fetch(`/api/chat/${chatId}?userId=${userId}`)
       .then(r => r.json())
       .then(data => {
+        // Ensure the chat exists in DB even if it was created locally first.
+        // This prevents header title fetch (/api/chat/name/..) from 404ing.
+        if (!data.chat) {
+          fetch('/api/chat/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chatId, userId, title: 'New Chat' }),
+          }).catch(() => {})
+        }
         if (data.messages && data.messages.length > 0) {
           // map DB messages to UI Message format
           loadHistory(data.messages.map((m: any) => ({
@@ -100,6 +110,9 @@ export default function ChatPage() {
             sources: m.metadata?.sources || [],
             mode: m.metadata?.mode || 'general',
           })))
+        }
+        if (data.chat?.title) {
+          setChatTitle(String(data.chat.title))
         }
         // restore PDF state if chat had a PDF
         // if (data.chat?.metadata?.pdfName) {

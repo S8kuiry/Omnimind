@@ -18,7 +18,9 @@ export async function GET(
 
         const chat = await Chat.findOne({ chatId, userId }).select('title').lean()
         if (!chat) {
-            return NextResponse.json({ title: '' }, { status: 404 })
+            // Chat may exist locally (sidebar) before first message is saved.
+            // Return a safe placeholder title instead of 404 to avoid noisy console errors.
+            return NextResponse.json({ title: 'New Chat' })
         }
 
         return NextResponse.json({ title: chat.title ?? '' })

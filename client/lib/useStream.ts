@@ -142,6 +142,10 @@ export function useStream(
     setMessages(history)
   }, [])
 
+  const setChatTitle = useCallback((t: string) => {
+    setTitle(t)
+  }, [])
+
   const streamingMsgIdRef = useRef<string | null>(null)
   const pendingContentRef = useRef('')
   const flushRafRef = useRef<number | null>(null)
@@ -173,12 +177,16 @@ export function useStream(
       setTitle(chatTitle)
     }
 
+    // Never overwrite an existing DB title with "New Chat" on later messages.
+    // Only send `title` when we have a real, non-placeholder title.
+    const titleForDb = chatTitle && chatTitle !== 'New Chat' ? chatTitle : undefined
+
     saveMessage({
       chatId,
       userId,
       role: 'user',
       content: question,
-      title: chatTitle,
+      ...(titleForDb ? { title: titleForDb } : {}),
       metadata: {},
     }).then(r => {
       if (!r.ok) setSaveWarning(r.error)
@@ -460,6 +468,7 @@ export function useStream(
     send,
     loadHistory,
     title,
+    setChatTitle,
     injectLoading,
     updateMessage,
     injectUserMessage,

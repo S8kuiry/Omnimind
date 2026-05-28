@@ -102,6 +102,12 @@ function enforceNoStrayFormattingTokens(s: string): string {
   // This is intentionally conservative: only strips when "**" immediately follows a word/number.
   t = t.replace(/([A-Za-z0-9])\*\*(?=\s|[.,;:!?)]|$)/g, '$1')
 
+  // User requirement: do not show bold markers at all
+  t = t.replace(/\*\*/g, '')
+
+  // User requirement: strip broken pipe+dash artifacts like "| - **Tools:**"
+  t = t.replace(/\|\s*-\s*/g, '')
+
   return t
 }
 
