@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from services.pdf_parser import extract_text_from_pdf
+from services.document_parser import extract_text_from_pdf
 from services.chunker import chunk_pages
 from services.embedder import embed_texts, embed_query, warmup_local_embeddings
 from services.vector_store import (
@@ -113,10 +113,10 @@ def title(req: TitleRequest):
 
 # ── Upload ─────────────────────────────────────────────────────────
 
-def _index_pdf(file_bytes: bytes, doc_name: str, scope: str, job_id: str) -> None:
+def _index_pdf(file_bytes: bytes, doc_name: str, scope: str, job_id: str, filename: str) -> None:
     try:
         UPLOAD_JOBS[job_id] = {**UPLOAD_JOBS.get(job_id, {}), "status": "parsing"}
-        pages = extract_text_from_pdf(file_bytes)
+        pages = extract_text_from_document(file_bytes, filename)
         if not pages:
             UPLOAD_JOBS[job_id] = {"status": "error", "error": "Could not extract text from PDF."}
             return
@@ -145,16 +145,17 @@ async def upload_pdf(
     user_id: str = Form("anonymous"),
     chat_id: str = Form(""),
 ):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files accepted")
+    if not file.filename.endswith((".pdf", ".docx")):
+        raise HTTPException(400, "Only PDF or DOCX  files accepted")
 
     file_bytes = await file.read()
-    doc_name = file.filename.replace(".pdf", "").replace(" ", "_")
+    original_filename = file.filename 
+    doc_name = file.filename.rsplit(".",1)[0].replace(" ", "_")
     scope = chat_id if chat_id else user_id
     job_id = str(uuid.uuid4())
 
     UPLOAD_JOBS[job_id] = {"status": "queued", "doc_name": doc_name}
-    asyncio.create_task(asyncio.to_thread(_index_pdf, file_bytes, doc_name, scope, job_id))
+    asyncio.create_task(asyncio.to_thread(_index_pdf, file_bytes, doc_name, scope, job_id, original_filename))
 
     return {
         "status": "processing",

@@ -3,7 +3,7 @@ from config import CHUNK_SIZE, CHUNK_OVERLAP
  
 def chunk_pages(pages: list[dict]) -> list[dict]: 
     """
-    Takes list of page dicts from pdf_parser.
+    Takes list of page dicts from document_parser.
     Returns list of chunk dicts with metadata preserved.
     
     Each chunk dict: { "text": str, "page": int, "chunk_id": str }
