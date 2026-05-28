@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import dbConnect from '@/lib/mongo'
 import Chat from '@/models/Chat'
+import Message from '@/models/Message'
 
 export async function GET(req: Request) {
     try {
@@ -14,7 +15,15 @@ export async function GET(req: Request) {
             .limit(20)
             .lean()
 
-        return NextResponse.json({ chats })
+        // Only show chats that actually have messages.
+        // This prevents empty "New Chat" rows from appearing on fresh load.
+        const withMessages: typeof chats = []
+        for (const c of chats) {
+            const hasAny = await Message.exists({ chatId: c.chatId, userId })
+            if (hasAny) withMessages.push(c)
+        }
+
+        return NextResponse.json({ chats: withMessages })
 
     } catch (error) {
         console.error('[get-chats]', error)

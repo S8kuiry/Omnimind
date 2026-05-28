@@ -66,10 +66,22 @@ async function generateAndSaveTitle(
         first_assistant_message: firstAssistantMessage,
       }),
     })
-    if (!res.ok) return null
-    const data = await res.json()
-    const title = typeof data?.title === 'string' ? data.title.trim() : ''
-    if (!title || title === 'New Chat') return null
+    let title = ''
+    if (res.ok) {
+      const data = await res.json()
+      title = typeof data?.title === 'string' ? data.title.trim() : ''
+    }
+
+    // Fallback: never leave chats as "New Chat"
+    if (!title || title.toLowerCase() === 'new chat') {
+      const cleaned = String(firstUserMessage || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const words = cleaned.split(' ').filter(Boolean)
+      title = words.length >= 3 ? words.slice(0, 7).join(' ') : 'General Conversation'
+    }
 
     await fetch(`/api/chat/${chatId}?userId=${userId}`, {
       method: 'PATCH',

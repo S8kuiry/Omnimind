@@ -281,7 +281,9 @@ Assistant: {assistant}
     title = title.replace('"', "").replace("'", "").strip()
     title = title.splitlines()[0].strip()
     if not title:
-        return "New Chat"
+        return "General Conversation"
+    if title.lower() in {"new chat", "chat", "conversation"}:
+        return "General Conversation"
     # clamp length
     if len(title) > 60:
         title = title[:60].rstrip()
