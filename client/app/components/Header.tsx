@@ -30,6 +30,12 @@ export default function Header() {
         }
 
         getChatName()
+        const onChatsUpdated = () => {
+            // keep header title in sync with sidebar updates
+            getChatName()
+        }
+        window.addEventListener('omnimind_chats_updated', onChatsUpdated)
+        return () => window.removeEventListener('omnimind_chats_updated', onChatsUpdated)
     }, [chatId, session?.user?.id])
 
     return (
