@@ -87,6 +87,24 @@ export function stripOrphanBoldMarkers(s: string): string {
   return t
 }
 
+/**
+ * Enforce UI-safe formatting:
+ * - No lines starting with "**", "--", "_" or "\--"
+ * - Remove dangling "**" that appear mid-sentence like "Figma** ok"
+ */
+function enforceNoStrayFormattingTokens(s: string): string {
+  let t = s
+
+  // Remove forbidden line starts (keep indentation)
+  t = t.replace(/^(\s*)(?:\\--+|--+|\*\*+|_+)\s*/gm, '$1')
+
+  // Remove mid-line dangling bold closers like "Word** " or "Word**." (not paired)
+  // This is intentionally conservative: only strips when "**" immediately follows a word/number.
+  t = t.replace(/([A-Za-z0-9])\*\*(?=\s|[.,;:!?)]|$)/g, '$1')
+
+  return t
+}
+
 /** Split headings glued to prior text or section numbers: Student###1. or ###2. */
 export function fixGluedHeadings(s: string): string {
   let t = s
@@ -946,6 +964,7 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
   s = s.replace(/[ \t]+$/gm, '')
 
   s = stripOrphanBoldMarkers(s)
+  s = enforceNoStrayFormattingTokens(s)
 
   if (opts?.forStream) {
     s = stripIncompleteTableTail(s)
