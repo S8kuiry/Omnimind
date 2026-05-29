@@ -1013,13 +1013,72 @@ export function stripStrayPipeCharacters(s: string): string {
     .replace(/^\|\s*$/gm, '')
 }
 
+/** Detect and re-number jammed multi-answer exam replies (model skips 2, 3… or repeats 1.). */
+export function repairNumberedExamAnswers(raw: string): string {
+  let text = raw.replace(/\r\n/g, '\n').trim()
+  if (!text) return text
+
+  text = text.replace(/^(\d+\.\s*\*\*[^*\n]+):(?!\*\*)/gm, '$1:**')
+
+  const markerCount = (text.match(/:\*\*/g) || []).length
+  if (markerCount < 2 && !/^\d+\.\s/m.test(text)) return text
+
+  type Marker = { start: number; end: number; title: string }
+  const found = new Map<number, Marker>()
+
+  const add = (start: number, end: number, title: string) => {
+    if (found.has(start)) return
+    const t = title.trim().replace(/:$/, '')
+    if (t.length < 2 || t.includes('\n')) return
+    found.set(start, { start, end, title: t })
+  }
+
+  const atLine =
+    /(?:^|\n)\s*(?:(?:\d+)\.\s*)?(?:\*\*)?([A-Z][A-Za-z0-9 /&()-]{2,100}?)(?:\*\*)?:?\*\*\s*/g
+  let m: RegExpExecArray | null
+  while ((m = atLine.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, m[1])
+  }
+
+  const numIncomplete = /(?:^|\n)\s*(?:\d+\.\s*)\*\*([^*\n]+?):(?:\*\*)?\s*/g
+  while ((m = numIncomplete.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, m[1])
+  }
+
+  const inline = /(?<=[.!?)\]])[ \t]+([A-Z][A-Za-z]+(?: [A-Za-z]+){1,10}):\*\*\s*/g
+  while ((m = inline.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, m[1])
+  }
+
+  const markers = [...found.values()].sort((a, b) => a.start - b.start)
+  if (markers.length < 2) return text
+
+  const blocks: string[] = []
+  for (let i = 0; i < markers.length; i++) {
+    const { end, title } = markers[i]
+    const chunkEnd = i + 1 < markers.length ? markers[i + 1].start : text.length
+    const chunk = text.slice(end, chunkEnd).trim()
+    const header = `${i + 1}. **${title}:**`
+    if (!chunk) {
+      blocks.push(header)
+    } else if (chunk.startsWith('- ') || chunk.includes('\n- ')) {
+      blocks.push(`${header}\n${chunk}`)
+    } else {
+      blocks.push(`${header} ${chunk}`)
+    }
+  }
+  return blocks.join('\n\n')
+}
+
 /** Light normalize for document RAG — keeps paragraph/heading spacing intact. */
 export function normalizeDocumentMarkdown(raw: string): string {
   let s = stripReasoningBlocks(raw)
   s = s.replace(/\[Source:[^\]]*\]/gi, '')
   s = s.replace(/\r\n/g, '\n')
   s = s.replace(/^(## .+)$/gm, '$1\n')
-  // Keep numbered exam answers readable: blank line between list items
+  if (!/^##\s/m.test(s)) {
+    s = repairNumberedExamAnswers(s)
+  }
   s = s.replace(/^(\d+\.\s+\*\*[^*\n]+:\*\*[^\n]*)\n(?=\d+\.\s+\*\*)/gm, '$1\n\n')
   s = s.replace(/\n{4,}/g, '\n\n\n')
   s = s.replace(/[ \t]+$/gm, '')
@@ -1154,6 +1213,10 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
 
   s = stripOrphanBoldMarkers(s)
   s = enforceNoStrayFormattingTokens(s)
+
+  if (!opts?.forStream) {
+    s = repairNumberedExamAnswers(s)
+  }
 
   if (opts?.forStream) {
     s = stripIncompleteTableTail(s)

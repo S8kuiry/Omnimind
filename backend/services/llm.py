@@ -385,15 +385,16 @@ def stream_answer(
         )
         messages.append({"role": "user", "content": user_content})
         temperature = 0.1
-        max_tokens = 4096 if query_type in ("multi_part", "full_summary", "list") else 2048
+        max_tokens = 8192 if query_type in ("multi_part", "full_summary", "list") else 2048
     else:
         messages = [{"role": "system", "content": CHAT_SYSTEM}]
         for msg in trimmed:
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": question})
-        long_chat = len((question or "").strip()) >= 100 or bool(re.search(r"\d+\.\s", question))
-        temperature = 0.5 if long_chat else 0.7
-        max_tokens = 4096 if long_chat else 2048
+        numbered_qs = len(re.findall(r"\d+\.\s", question or ""))
+        long_chat = len((question or "").strip()) >= 100 or numbered_qs >= 1
+        temperature = 0.4 if numbered_qs >= 2 else (0.5 if long_chat else 0.7)
+        max_tokens = 8192 if numbered_qs >= 2 else (4096 if long_chat else 2048)
 
     if use_json_mode:
         raw = _complete_chat(
