@@ -109,7 +109,7 @@ const [chatToDelete, setChatToDelete] = useState<string | null>(null);
       style={{
         width: collapsed ? '64px' : '220px',
         minWidth: collapsed ? '64px' : '220px',
-        background: 'rgba(39, 35, 35, 0.86)',
+        background: 'rgba(32, 29, 29, 0.47)',
         borderColor: 'rgba(255,255,255,0.06)',
       }}
     >
