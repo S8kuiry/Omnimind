@@ -1019,6 +1019,8 @@ export function normalizeDocumentMarkdown(raw: string): string {
   s = s.replace(/\[Source:[^\]]*\]/gi, '')
   s = s.replace(/\r\n/g, '\n')
   s = s.replace(/^(## .+)$/gm, '$1\n')
+  // Keep numbered exam answers readable: blank line between list items
+  s = s.replace(/^(\d+\.\s+\*\*[^*\n]+:\*\*[^\n]*)\n(?=\d+\.\s+\*\*)/gm, '$1\n\n')
   s = s.replace(/\n{4,}/g, '\n\n\n')
   s = s.replace(/[ \t]+$/gm, '')
   return s.trim()

@@ -351,6 +351,7 @@ def stream_answer(
     conversational = is_conversational(question) and not force_document_mode
     trimmed = trim_history(history, max_messages=8, max_chars=600)
     use_json_mode = bool(chunks) and not conversational
+    query_type = _classify_document_query(question) if (chunks or force_document_mode) else "narrow"
 
     if conversational:
         greet_system = (
@@ -384,7 +385,7 @@ def stream_answer(
         )
         messages.append({"role": "user", "content": user_content})
         temperature = 0.1
-        max_tokens = 2048
+        max_tokens = 4096 if query_type in ("multi_part", "full_summary", "list") else 2048
     else:
         messages = [{"role": "system", "content": CHAT_SYSTEM}]
         for msg in trimmed:
@@ -402,7 +403,7 @@ def stream_answer(
             max_tokens=max_tokens,
         )
         raw = strip_reasoning_blocks(raw)
-        sections, display, used_json = resolve_document_display(raw)
+        sections, display, used_json = resolve_document_display(raw, layout=query_type)
 
         if parsed_sections_out is not None:
             parsed_sections_out.clear()
