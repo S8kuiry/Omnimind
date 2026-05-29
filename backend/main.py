@@ -31,7 +31,7 @@ from services.llm import (
     generate_chat_title,
 )
 from services.conversation import is_conversational
-from services.citations import build_section_sources
+from services.citations import build_section_sources, build_section_sources_from_json
 from config import TOP_K_RESULTS, GROQ_MODEL, ALLOWED_MODELS
 
 
@@ -211,6 +211,9 @@ async def stream(request: QueryRequest):
             ]
             yield f"data: [CHUNKS]{json.dumps(chunk_payload)}\n\n"
 
+        parsed_sections: list[dict] = []
+        used_json: list[bool] = []
+
         # 2. Stream LLM tokens (plain text — matches useStream.ts)
         full_response = ""
         for token in stream_answer(
@@ -220,26 +223,36 @@ async def stream(request: QueryRequest):
             model=model,
             doc_names=doc_names,
             force_document_mode=force_doc_mode,
+            parsed_sections_out=parsed_sections,
+            used_json_out=used_json,
         ):
             full_response += token
             yield f"data: {token}\n\n"
 
-        # 3. Parse [Source: X, Page N] citations from completed response
-        pattern = r'\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]'
-        matches = re.findall(pattern, full_response)
-        seen = set()
-        sources = []
-        for source, page in matches:
-            norm = _normalize_doc_name(source.strip())
-            key = f"{norm}-{page}"
-            if key not in seen:
-                seen.add(key)
-                sources.append({"source": norm, "page": int(page)})
+        json_document_mode = bool(used_json and used_json[0])
 
-        if sources:
-            yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
+        # 3. Inline [Source: ...] only for non-JSON markdown fallbacks / legacy paths
+        if not json_document_mode:
+            pattern = r'\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]'
+            matches = re.findall(pattern, full_response)
+            seen = set()
+            sources = []
+            for source, page in matches:
+                norm = _normalize_doc_name(source.strip())
+                key = f"{norm}-{page}"
+                if key not in seen:
+                    seen.add(key)
+                    sources.append({"source": norm, "page": int(page)})
 
-        section_sources = build_section_sources(full_response, chunks)
+            if sources:
+                yield f"data: [SOURCES]{json.dumps(sources)}\n\n"
+
+        if parsed_sections:
+            section_sources = build_section_sources_from_json(parsed_sections, chunks)
+            if not section_sources:
+                section_sources = build_section_sources(full_response, chunks)
+        else:
+            section_sources = build_section_sources(full_response, chunks)
         if section_sources:
             yield f"data: [SECTION_SOURCES]{json.dumps(section_sources)}\n\n"
 

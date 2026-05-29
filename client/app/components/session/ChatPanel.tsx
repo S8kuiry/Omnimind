@@ -172,6 +172,7 @@ export default function ChatPanel({ messages, isStreaming, streamingMessageId, o
                       sources={msg.sources}
                       onOpenSource={onOpenSource}
                       defaultDoc={hasDocs[0]}
+                      documentMode={msg.mode === 'document'}
                     />
                   )}
                 </div>

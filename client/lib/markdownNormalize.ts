@@ -1013,6 +1013,17 @@ export function stripStrayPipeCharacters(s: string): string {
     .replace(/^\|\s*$/gm, '')
 }
 
+/** Light normalize for document RAG — keeps paragraph/heading spacing intact. */
+export function normalizeDocumentMarkdown(raw: string): string {
+  let s = stripReasoningBlocks(raw)
+  s = s.replace(/\[Source:[^\]]*\]/gi, '')
+  s = s.replace(/\r\n/g, '\n')
+  s = s.replace(/^(## .+)$/gm, '$1\n')
+  s = s.replace(/\n{4,}/g, '\n\n\n')
+  s = s.replace(/[ \t]+$/gm, '')
+  return s.trim()
+}
+
 export function stripIncompleteTableTail(text: string): string {
   const lines = text.split('\n')
   let lastTableStart = -1

@@ -9,13 +9,13 @@ export type SourceRef = {
   sectionContext?: string
 }
 
-/** Extra weight when matching Pinecone chunks to a section heading */
+/** Extra weight when matching Pinecone chunks to a section heading (generic boosts). */
 const SECTION_KEYWORDS: Record<string, string[]> = {
-  overview: ['summary', 'contact', 'email', 'portfolio', 'kolkata'],
-  'technical skills': ['skills', 'frontend', 'backend', 'languages', 'frameworks'],
-  projects: ['project', 'built', 'platform', 'stack', 'github', 'sign talk', 'orbithire'],
-  experience: ['intern', 'pawmax', 'android', 'hybrid', 'developer', 'play store', 'employment'],
-  education: ['university', 'b.tech', 'degree', 'graduation', 'adamas', 'engineering'],
+  summary: ['summary', 'overview', 'abstract', 'introduction', 'purpose'],
+  methods: ['method', 'methodology', 'approach', 'procedure', 'experiment'],
+  results: ['result', 'finding', 'outcome', 'conclusion', 'data'],
+  obligations: ['obligation', 'requirement', 'must', 'shall', 'duty'],
+  terms: ['term', 'clause', 'condition', 'agreement', 'provision'],
 }
 
 /** Normalize section titles for matching LLM headings to source labels. */

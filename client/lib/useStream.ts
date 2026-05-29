@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { createStreamSanitizer, stripReasoningBlocks } from './sanitizeModelOutput'
-import { normalizeMarkdown } from './markdownNormalize'
+import { normalizeMarkdown, normalizeDocumentMarkdown } from './markdownNormalize'
 import { streamQuery } from './api'
 import autoNameChat from './autoNameChat'
 import { buildHistoryPayload } from './conversation'
@@ -377,12 +377,17 @@ export function useStream(
       const inlineCitations = parseInlineCitations(fullResponse)
 
       // Now strip and normalize for display
-      fullResponse = stripCitationTags(
-        normalizeMarkdown(stripReasoningBlocks(fullResponse)),
-      )
+      const normalizeFinal = (text: string) => {
+        const stripped = stripCitationTags(stripReasoningBlocks(text))
+        if (hadRagChunks) {
+          return normalizeDocumentMarkdown(stripped)
+        }
+        return normalizeMarkdown(stripped)
+      }
+      fullResponse = normalizeFinal(fullResponse)
 
-      // Build sources from inline citations (accurate) or fall back to raw chunks (honest)
-      if (inlineCitations.length > 0) {
+      const hasSectionLabels = finalSources.some(s => s.label)
+      if (!hasSectionLabels && inlineCitations.length > 0) {
         const seen = new Set<string>()
         finalSources = inlineCitations
           .filter(c => {
@@ -397,8 +402,7 @@ export function useStream(
             snippet: snippetMapRef[`${c.source}-${c.page}`],
             label: c.surroundingText,
           }))
-      } else if (hadRagChunks && chunksRef.length > 0) {
-        // LLM didn't cite inline — show retrieved chunks, no fake section matching
+      } else if (!hasSectionLabels && hadRagChunks && chunksRef.length > 0) {
         const seen = new Set<string>()
         finalSources = chunksRef.filter(c => {
           const k = `${c.source}-${c.page}`

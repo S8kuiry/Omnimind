@@ -39,6 +39,55 @@ def _parse_sections(content: str) -> list[dict]:
     return sections
 
 
+def _section_body_text(sec: dict) -> str:
+    parts: list[str] = []
+    body = (sec.get("body") or "").strip()
+    if body:
+        parts.append(body)
+    for item in sec.get("items") or []:
+        parts.append(str(item))
+    return "\n".join(parts).strip()
+
+
+def build_section_sources_from_json(sections: list[dict], chunks: list[dict]) -> list[dict]:
+    """One citation per titled JSON section, matched to best chunk by text overlap."""
+    if not sections or not chunks:
+        return []
+
+    out: list[dict] = []
+    seen_labels: set[str] = set()
+
+    for sec in sections:
+        heading = sec.get("title") or sec.get("heading")
+        if not heading:
+            continue
+        key = re.sub(r"[^a-z0-9]+", " ", str(heading).lower()).strip()
+        if not key or key in seen_labels:
+            continue
+        seen_labels.add(key)
+
+        body_text = _section_body_text(sec)
+        probe = f"{heading} {body_text}"
+        best = chunks[0]
+        best_score = -1.0
+        for c in chunks:
+            score = _overlap(probe, c.get("text", ""))
+            if score > best_score:
+                best_score = score
+                best = c
+
+        source = (best.get("source") or "").replace(".pdf", "")
+        out.append({
+            "source": source,
+            "page": int(best.get("page") or 1),
+            "label": str(heading).strip(),
+            "snippet": (best.get("text") or "")[:280],
+            "sectionContext": body_text[:800],
+        })
+
+    return out
+
+
 def build_section_sources(content: str, chunks: list[dict]) -> list[dict]:
     """One citation per ## heading, matched to best chunk by text overlap."""
     if not content or not chunks:

@@ -1,6 +1,5 @@
 import re
 
-# Short social / acknowledgment turns — answer briefly, don't re-run doc QA
 _CONVERSATIONAL_RE = re.compile(
     r"^\s*("
     r"hi|hello|hey|hiya|yo|sup|"
@@ -22,7 +21,6 @@ def is_conversational(text: str) -> bool:
         return False
     if len(t) <= 48 and _CONVERSATIONAL_RE.match(t):
         return True
-    # Very short messages with no question mark and no doc keywords
     if len(t) <= 12 and "?" not in t:
         return True
     return False
@@ -34,7 +32,6 @@ def trim_history(
     max_messages: int = 8,
     max_chars: int = 600,
 ) -> list[dict]:
-    """Keep recent turns but cap size so old long answers don't dominate context."""
     trimmed: list[dict] = []
     for msg in history[-max_messages:]:
         role = msg.get("role", "user")
@@ -50,29 +47,35 @@ def trim_history(
 CHAT_SYSTEM = """You are a helpful assistant in an ongoing conversation.
 
 Rules:
-- Answer ONLY the user's latest message. Do not repeat, re-list, or re-answer earlier questions unless they explicitly ask you to.
-- **Greetings** (hi, hello, hey, good morning): ONE short friendly sentence only — e.g. "Hi! How can I help you today?" No markdown headings, no bullets, no `## About Me`, no resume, no contact info, no `> **Tip:**` unless they ask for help.
-- **Thanks / bye / ok**: one or two short sentences, same rules — no document dump.
-- For substantive questions (not greetings): use ## headings and bullets when helpful.
-- Never output resume sections (Overview, Projects, Experience) unless the user explicitly asks about their resume or document.
-- No internal reasoning or XML tags."""
+- Answer ONLY the user's latest message. Be clear, accurate,descriptive , and complete.
+- Greetings (hi, hello, hey): ONE short friendly sentence. No headings or bullets.
+- Thanks / bye / ok: one or two short sentences.
+- Single-topic questions: plain prose or short bullets as needed.
 
-DOC_SYSTEM = """You are a document-grounded assistant. The user's message includes DOCUMENT CONTEXT extracted from their uploaded file(s).
+Multi-part or numbered exam-style questions — use this format (match question numbers):
+1. **Topic Name:** Answer in 1–4 sentences on the same line or following lines.
+2. **Next Topic:** Next answer.
 
-CRITICAL — all models must follow:
-- Use ONLY facts that appear in DOCUMENT CONTEXT. Never use training data, memory, or guesswork about the user's portfolio.
-- Never invent project names unless that exact name appears in the context.
-- If the question is narrow, answer ONLY that topic — do NOT dump unrelated resume sections.
-- If the context does not contain the answer, say: "The uploaded document does not mention [topic]."
-- Do not write [Source: ...] in the answer — the app adds citation chips per section automatically.
-- Greetings/thanks: 1–2 plain sentences only (no headings, no bullets).
+For list-style sub-answers under one question, use bullets:
+3. **Disaster Management Cycle:**
+- **Mitigation:** reducing risk before disaster
+- **Preparedness:** planning and training
 
-MARKDOWN (broken markdown breaks the UI — follow exactly):
-- Use `## SectionName` for each major section (Contact, Education, Experience, Projects, Skills).
-- Every bullet on its own line, starting with `- ` (never `* *` or inline `* item * item`).
-- Label format: `- **Label:** value` — colon inside bold, one space after `**`, value on the same line.
-- NEVER: `**Stack:***React`, `647151- **`, `**text**\\n**`, or orphan `**` on a line alone.
-- Projects: `- **ProjectName** — short summary` then indented sub-bullets with `- detail`.
-- Tech lists: comma-separated on one line after the label, e.g. `- **Stack:** React Native, Expo, JavaScript`.
-- No `> **Tip:**` unless the user asked for advice.
-- No filler intros. Start with substance."""
+Formatting rules:
+- Use `N. **Topic:**` — numbered list with bold topic label, then the answer. Not ## or ### headings.
+- Answer every numbered question; do not skip any.
+- Blank line between numbered items when answers are long.
+- No filler intros. No internal reasoning or XML tags."""
+
+DOC_SYSTEM_JSON = """You are a document-grounded assistant. The user message includes DOCUMENT CONTEXT from uploaded file(s) — any type: contracts, research papers, reports, manuals, resumes, etc.
+
+Hard rules (never break these):
+1. Use ONLY facts that appear in DOCUMENT CONTEXT. No training data, memory, or guesswork.
+2. If the answer is not in the context, say exactly: "The uploaded document does not mention [topic]."
+3. Answer ONLY what the user asked. Do not add unrelated sections or topics.
+4. Never invent names, dates, numbers, statistics, clauses, or quotes not in the context.
+5. Output valid JSON only (schema in the user message). Plain text inside body and items — no markdown, no **, no ##, no [Source:...], no page numbers.
+6. Be direct. No filler intros like "Based on the document..." or "It seems that...".
+7. Greetings/thanks with a document attached: one section, title null, body 1–2 sentences."""
+
+DOC_SYSTEM = DOC_SYSTEM_JSON
