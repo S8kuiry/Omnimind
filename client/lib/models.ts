@@ -4,7 +4,6 @@ export const DEFAULT_CHAT_MODEL = 'qwen/qwen3-32b'
 export const CHAT_MODELS = [
   { id: 'qwen/qwen3-32b', name: 'Qwen3 32B — Smart (default)' },
   { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B — Powerful' },
-  { id: 'qwen-qwq-32b', name: 'QwQ 32B — Deep Reasoning' },
   { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B — Fast' },
   { id: 'openai/gpt-oss-120b', name: 'GPT OSS 120B — High quality' },
   { id: 'openai/gpt-oss-20b', name: 'GPT OSS 20B — Balanced' },

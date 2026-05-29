@@ -53,68 +53,48 @@ def _wants_full_resume_summary(question: str) -> bool:
     return False
 
 
+# 
+
 def _prompt_qa(question: str, chunks: list[dict], doc_names: list[str] | None = None) -> str:
     context = _build_context(chunks)
     indexed = ", ".join(doc_names) if doc_names else "see segments below"
+
     format_block = ""
     if _wants_full_resume_summary(question):
         format_block = """
-### FORMAT (full resume summary):
-Use `## Contact`, `## Education`, `## Experience`,`## Hidden Patterns`,`Important loophole areas`,`## Research Insights`, `## Projects`, `## Technical Skills` — ONLY facts from the document. Skip empty sections.
-Each section = `## Heading` then `- **Label:** value` bullets (one per line). Projects get `- **Name** — summary` plus `- detail` sub-bullets.
+### STRUCTURE (resume summary only):
+Use these sections in order — only if the document contains that data:
+Contact · Education · Experience · Projects · Technical Skills · Research Insights
+
+Each section:
+- Start with ## SectionName
+- One bullet per item: - **Label:** value
+- Projects: - **Name** — one-line summary, then sub-bullets for details
+- Skip any section with no data
 """
-    else:
-        format_block = """
-### FORMAT (targeted question):
-- Use `##` matching the topic asked only. Do NOT dump Contact/Education/Experience/Projects unless asked.
-- Bullets: `- **Label:** value` on separate lines. No broken `**` or `* *` markers.
-"""
+    # For targeted questions: no format block at all — let prose flow naturally
 
-    return f"""Answer using ONLY the DOCUMENT CONTEXT below.
+    return f"""You are a precise document assistant. Answer using ONLY the document context below.
 
-### CITATION RULES (mandatory):
-- After every sentence that uses document content, append a citation in EXACTLY this format:
-  [Source: doc_name, Page N]
-- Use the exact doc_name as it appears in the DOCUMENT CONTEXT headers (no .pdf extension).
-- Place the citation immediately after the sentence it supports — never group at the end.
-- One citation per sentence maximum.
-- If an entire paragraph draws from one source, one citation at the end of the paragraph is fine.
+### TONE AND STYLE:
+Write like a knowledgeable colleague explaining something clearly — not like a report generator.
+Use plain flowing prose. Short paragraphs. No unnecessary structure.
+Only use bullet points when listing 3 or more genuinely enumerable items.
+Only use headings (##) if the answer covers 3 or more distinct topics.
+Never bold random words or phrases. Bold only labels like **Name:** or **Stack:** when showing structured data.
+Never start a response with a heading. Lead with a sentence.
 
-Example output:
-The candidate has 3 years of React experience [Source: resume, Page 2].
-They also hold a BSc in Computer Science [Source: resume, Page 1].
+### CITATIONS (mandatory):
+After every sentence drawn from the document, append: [Source: doc_name, Page N]
+Use the exact doc_name from the context headers. No .pdf extension.
+One citation per sentence. If a full paragraph draws from one source, one citation at the end is fine.
 
 ### GROUNDING:
-1. Document context is the only source of truth — no training data.
-2. Do not invent projects, stacks, or features not in the context.
-3. Segments with the same filename are ONE document.
-
-### MARKDOWN (strict — follow exactly):
-## Structure and Hierarchy
-- Use `##` for major section dividers. 
-- Do not use `###` or deeper heading depths unless the data requires nested sub-categories.
-- Separate all sections with exactly one blank line. Do not use double blank lines, horizontal rules (`---`), trailing dashes, or structural dividers.
-
-## Text Formatting and Emphasis
-- Never start any sentence with ('**','*','-',`_`,'|')
-- Apply bold styling (`**Label:**`) to metadata or categorical labels only. 
-- Never bold entire sentences, single phrases, or random descriptive words mid-paragraph.
-- Maintain a concise, objective, and professional tone. Completely eliminate introductory filler, transition statements, or conversational phrases (e.g., "Certainly", "Based on the text").
-
-## Data Representation Rules
-- **Technical Stacks:** Group all frameworks, languages, and tools into a single, comma-separated bullet point. Do not split items across multiple lines.
-  * Correct: `- **Stack:** React, Node.js, PostgreSQL`
-  * Incorrect: Separate bullets for each technology.
-- **Attributes, Facts, and Timelines:** Output concrete skills, factual metrics, and chronological dates exclusively as clean bullet points.
-- **Explanations and Syntheses:** Output contextual explanations, reasoning, or qualitative summaries as short prose paragraphs limited to 3-6 sentences maximum.
-- **Structural Integrity:** Never mix formatting types. Do not initiate a bullet point and then continue it as a prose block. Ensure labels and values occupy the exact same line.
-  * Correct: `- **Label:** Value [Source: filename, Page X].`
-  * Incorrect: `- **Label:**\nValue` or `- **Label:***Value`
+Only use information present in the document context. Never invent or infer beyond what is written.
 
 ### INDEXED FILES:
 {indexed}
 {format_block}
-
 ### DOCUMENT CONTEXT:
 {context}
 

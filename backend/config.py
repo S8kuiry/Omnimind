@@ -31,7 +31,6 @@ ALLOWED_MODELS = {
     "qwen/qwen3-32b",
 
     # Reasoning-focused
-    "qwen-qwq-32b",
 
     # Open-weight "GPT OSS" (listed as production models in Groq docs)
     "openai/gpt-oss-20b",
