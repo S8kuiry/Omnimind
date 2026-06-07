@@ -240,7 +240,7 @@ export async function overrideDecision(
 }
 
 export const deleteEmail = async (userEmail: string, emailId: string) => {
-  const response = await fetch(`/emails/${emailId}?user_email=${encodeURIComponent(userEmail)}`, {
+  const response = await fetch(`${BASE}/emails/${emailId}?user_email=${encodeURIComponent(userEmail)}`, {
     method: 'DELETE',
   });
   if (!response.ok) throw new Error('Failed to delete email');

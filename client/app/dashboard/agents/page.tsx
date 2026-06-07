@@ -27,7 +27,7 @@ export default function AgentsPage() {
 
   return (
     <div className="flex-1 h-screen overflow-y-auto px-8 py-10" style={{ background: '#010003' }}>
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-7xl mx-auto">
 
         {/* Header */}
         <div className="mb-8">
