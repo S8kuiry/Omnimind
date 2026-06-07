@@ -123,7 +123,23 @@ export function getGmailAuthUrl(): string {
   return `${getEmailAgentBaseUrl()}/auth/google`
 }
 
-export async function getAuthStatus(userEmail: string): Promise<AuthStatus> {
+export async function getAuthMe(): Promise<AuthStatus> {
+  try {
+    const res = await fetch(`${getEmailAgentBaseUrl()}/auth/me`, fetchOpts)
+    if (!res.ok) return { connected: false }
+    return res.json()
+  } catch {
+    return { connected: false }
+  }
+}
+
+/** Check Gmail link — cookie session first, then MongoDB tokens for userEmail */
+export async function getAuthStatus(userEmail?: string): Promise<AuthStatus> {
+  const fromCookie = await getAuthMe()
+  if (fromCookie.connected) return fromCookie
+
+  if (!userEmail) return { connected: false }
+
   try {
     const res = await fetch(
       `${getEmailAgentBaseUrl()}/auth/status?email=${encodeURIComponent(userEmail)}`,

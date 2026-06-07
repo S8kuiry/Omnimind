@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   Mail, ShieldCheck, RefreshCw, XCircle, RotateCcw,
   Inbox, CheckCircle2, AlertCircle, ArrowRight, Wifi, WifiOff,
@@ -35,6 +36,7 @@ interface StatsState {
 
 function EmailAgentContent() {
   const searchParams = useSearchParams();
+  const { data: session, status: sessionStatus } = useSession();
   const [email, setEmail] = useState<string | null>(null);
   const [isConnected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,18 +54,20 @@ function EmailAgentContent() {
   });
 
   useEffect(() => {
+    if (sessionStatus === "loading") return;
+
     const authStatus = searchParams.get("auth");
     const urlEmail = searchParams.get("email");
     if (authStatus === "success" && urlEmail) {
-      sessionStorage.setItem("email_agent_email", urlEmail);
       setEmail(urlEmail);
       setConnected(true);
       setLoading(false);
       window.history.replaceState({}, "", "/dashboard/agents/email");
       return;
     }
-    checkAuth();
-  }, [searchParams]);
+
+    void checkAuth(session?.user?.email ?? undefined);
+  }, [searchParams, sessionStatus, session?.user?.email]);
 
   useEffect(() => {
     if (isConnected && email) {
@@ -71,19 +75,13 @@ function EmailAgentContent() {
     }
   }, [isConnected, email]);
 
-  const checkAuth = async () => {
-    const stored = sessionStorage.getItem("email_agent_email");
-    if (!stored) {
-      setConnected(false);
-      setLoading(false);
-      return;
-    }
-    const statusData = await getAuthStatus(stored);
+  const checkAuth = async (accountEmail?: string) => {
+    const statusData = await getAuthStatus(accountEmail);
     if (statusData.connected && statusData.email) {
-      sessionStorage.setItem("email_agent_email", statusData.email);
       setEmail(statusData.email);
       setConnected(true);
     } else {
+      setEmail(null);
       setConnected(false);
     }
     setLoading(false);
@@ -126,12 +124,11 @@ function EmailAgentContent() {
   };
 
   const handleRevoke = async () => {
-    const acc = email ?? sessionStorage.getItem("email_agent_email");
+    const acc = email ?? session?.user?.email;
     if (!acc) return;
     setRevoking(true);
     try {
       await revokeGmailAuth(acc);
-      sessionStorage.removeItem("email_agent_email");
       setConnected(false);
       setEmail(null);
       setStats({ total: "—", unread: "—", resolved: "—", draftsCreated: "0", spamBlocked: "0", automationRate: "0" });

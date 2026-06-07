@@ -73,6 +73,12 @@ async def get_current_email(request: Request) -> str:
     return session["email"]
 
 
+def _user_has_gmail_link(user: dict | None) -> bool:
+    if not user:
+        return False
+    return bool(user.get("google_refresh_token") or user.get("google_access_token"))
+
+
 async def _session_auth_payload(request: Request) -> dict:
     sid = request.cookies.get(SESSION_COOKIE_NAME)
     if not sid:
@@ -84,7 +90,7 @@ async def _session_auth_payload(request: Request) -> dict:
 
     email = session["email"]
     user = await find_user(email)
-    if not user or not user.get("google_access_token"):
+    if not _user_has_gmail_link(user):
         return {"connected": False, "email": email}
 
     return {
@@ -167,7 +173,7 @@ async def auth_status(request: Request, email: str = Query(None)):
         return {"connected": False}
 
     user = await find_user(email)
-    if not user or not user.get("google_access_token"):
+    if not _user_has_gmail_link(user):
         return {"connected": False}
     return {
         "connected": True,
@@ -186,7 +192,7 @@ async def _resolve_revoke_email(request: Request, email: str | None) -> str:
 
     if email:
         user = await find_user(email)
-        if user and user.get("google_access_token"):
+        if user and _user_has_gmail_link(user):
             return email
 
     raise HTTPException(status_code=401, detail="Not connected")
