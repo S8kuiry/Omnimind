@@ -417,6 +417,24 @@ async def delete_email(email_id: str, user_email: str = Query(...)):
     return {"message": f"Email {email_id} deleted"}
 
 
+# ── PATCH /emails/{id}/read ────────────────────────────────────────────
+@router.patch("/emails/{email_id}/read")
+async def mark_as_read(email_id: str, payload: dict):
+    user_email = payload.get("user_email")
+    emails_col = get_collection("emails")
+    
+    result = await emails_col.update_one(
+        {"_id": ObjectId(email_id), "user_email": user_email},
+        {"$set": {"is_read": True}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Email document not found")
+        
+    return {"status": "success", "message": "Email marked as read"}
+    
+
+
 # ── Internal helpers ───────────────────────────────────────────────
 
 def _build_draft_prompt(email_doc: dict, tone: str, context: str) -> str:

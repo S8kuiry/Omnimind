@@ -287,3 +287,23 @@ export const deleteEmail = async (userEmail: string, emailId: string) => {
   if (!response.ok) throw new Error('Failed to delete email');
   return response.json();
 };
+
+
+export async function markEmailAsRead(userEmail: string, emailId: string) {
+  // Use your real environment URL variable or fallback route
+  const baseUrl = process.env.NEXT_PUBLIC_EMAIL_AGENT_SERVER_URL || 'http://localhost:8000'
+  
+  const response = await fetch(`${baseUrl}/emails/${emailId}/read`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ user_email: userEmail }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to update status code: ${response.status}`)
+  }
+
+  return response.json()
+}

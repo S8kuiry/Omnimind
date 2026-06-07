@@ -7,7 +7,6 @@ const PRIORITY_DOT: Record<string, string> = {
   low:    'rgba(80,210,80,0.8)',
 }
 
-// Updated to perfectly align with your backend category schema
 const CATEGORY_COLOR: Record<string, string> = {
   work:       'rgba(100,150,255,0.7)',
   newsletter: 'rgba(160,160,160,0.5)',
@@ -23,13 +22,13 @@ export default function EmailCard({
   email: EmailItem
   selected: boolean
   onClick: () => void
-  userEmail: string // Changed from userId to userEmail
+  userEmail: string 
   onUpdate: () => void
 }) {
   return (
     <div
       onClick={onClick}
-      className="px-4 py-3 cursor-pointer transition-all duration-150 border-b"
+      className="px-4 py-3 cursor-pointer transition-all duration-150 border-b select-none"
       style={{
         background: selected ? 'rgba(210,140,160,0.07)' : 'transparent',
         borderColor: 'rgba(255,255,255,0.04)',
@@ -43,15 +42,36 @@ export default function EmailCard({
       }}
     >
       <div className="flex items-start gap-2.5">
-        {/* Priority dot */}
-        <div className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0"
-          style={{ background: PRIORITY_DOT[email.priority] ?? 'rgba(255,255,255,0.2)' }} />
+        
+        {/* Left Status Group: Dynamic Unread Status + Priority Marker */}
+        <div className="flex flex-col items-center gap-1.5 mt-1.5 flex-shrink-0">
+          {/* 🟡 Unread Notification Dot - Disappears completely when email.is_read is true */}
+          {!email.is_read && (
+            <div 
+              className="w-1.5 h-1.5 rounded-full animate-pulse" 
+              style={{ background: 'rgba(255, 190, 60, 0.95)' }} // High visibility amber/yellow
+              title="Unread message"
+            />
+          )}
+          
+          {/* Static Priority Dot */}
+          <div 
+            className="w-1 h-1 rounded-full"
+            style={{ background: PRIORITY_DOT[email.priority] ?? 'rgba(255,255,255,0.2)' }} 
+          />
+        </div>
 
         <div className="min-w-0 flex-1">
           {/* Sender + category */}
           <div className="flex items-center justify-between gap-2 mb-0.5">
-            <span className="text-xs font-medium truncate" style={{ color: 'rgba(255,255,255,0.75)' }}>
-              {/* Fixed: Uses from_name and from_address instead of old sender fields */}
+            <span 
+              className="text-xs truncate transition-colors" 
+              style={{ 
+                // Bold and bright if unread; lighter weight and muted if read
+                fontWeight: !email.is_read ? '600' : '400',
+                color: !email.is_read ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.45)' 
+              }}
+            >
               {email.from_name ? email.from_name.trim() : email.from_address}
             </span>
             <span className="text-[9px] flex-shrink-0 capitalize"
@@ -60,17 +80,28 @@ export default function EmailCard({
             </span>
           </div>
 
-          {/* Subject */}
-          <p className="text-xs truncate mb-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
+          {/* Subject Line */}
+          <p 
+            className="text-xs truncate mb-1 transition-colors" 
+            style={{ 
+              fontWeight: !email.is_read ? '550' : '400',
+              color: !email.is_read ? 'rgba(255,255,255,0.8)`' : 'rgba(255,255,255,0.35)' 
+            }}
+          >
             {email.subject}
           </p>
 
           {/* Summary or snippet */}
-          <p className="text-[10px] truncate leading-relaxed" style={{ color: 'rgba(255,255,255,0.28)' }}>
+          <p 
+            className="text-[10px] truncate leading-relaxed transition-colors" 
+            style={{ 
+              color: !email.is_read ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.22)' 
+            }}
+          >
             {email.summary || email.snippet}
           </p>
 
-          {/* Badges mapped directly onto backend llm_action states */}
+          {/* Action Badges */}
           <div className="flex items-center gap-1.5 mt-1.5">
             {email.llm_action === 'draft_saved' && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"

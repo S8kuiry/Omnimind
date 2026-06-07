@@ -52,7 +52,7 @@ export default function EmailStatsBar({ stats }: { stats: EmailStats }) {
           style={{ background: '#010003' }}
         >
           <span
-            className="text-sm font-semibold tabular-nums"
+            className="text-[10px] font-semibold tabular-nums"
             style={{ color: item.color }}
           >
             {item.value}

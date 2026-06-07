@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Mail, RefreshCw, LogOut } from 'lucide-react'
 import {
-  fetchEmails, fetchEmailStats, revokeGmailAuth, syncEmailAgent,
+  fetchEmails, fetchEmailStats, markEmailAsRead, revokeGmailAuth, syncEmailAgent,
   type EmailItem, type EmailStats,
 } from '@/lib/automationApi'
 import EmailCard from './EmailCard'
@@ -181,10 +181,43 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
     window.location.reload()
   }
 
-  const handleSelect = (email: EmailItem) => {
-    setSelected(prev => prev?._id === email._id ? null : email)
-  }
+  const handleSelect = async (email: EmailItem) => {
+    // Check if we are opening a new email or closing the current one
+    const isOpening = selected?._id !== email._id
 
+    // Toggle selection panel layout
+    setSelected(prev => prev?._id === email._id ? null : email)
+
+    // If we are opening an email and it is currently unread, update it
+    if (isOpening && !email.is_read) {
+      
+      // 1. OPTIMISTIC UPDATE: Instantly change local state so UI updates without lag
+      setEmails(prevEmails =>
+        prevEmails.map(item => 
+          item._id === email._id ? { ...item, is_read: true } : item
+        )
+      )
+
+      try {
+        // 2. BACKEND SYNC: Fire background network request to FastAPI
+        await markEmailAsRead(userEmail, email._id)
+
+        // 3. COUNTER SYNC: Refresh the stats bar quietly to update the counts
+        const statsData = await fetchEmailStats(userEmail)
+        setStats(statsData)
+        
+      } catch (err) {
+        console.error("[Dashboard Error] Failed to mark email as read on server:", err)
+        
+        // Fallback: Rollback local state if network completely failed
+        setEmails(prevEmails =>
+          prevEmails.map(item => 
+            item._id === email._id ? { ...item, is_read: false } : item
+          )
+        )
+      }
+    }
+  }
   return (
     <div className="flex flex-col rounded-2xl overflow-hidden border"
       style={{ background: '#010003', borderColor: 'rgba(255, 255, 255, 0.21)', minHeight: '480px' }}>
