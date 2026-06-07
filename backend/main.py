@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import uuid
+import os  # Added for environment variable parsing
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Form, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -173,9 +174,6 @@ def upload_status(job_id: str):
     return job
 
 
-
-
-
 @app.post("/stream")
 async def stream(request: QueryRequest):
     scope = request.chat_id or request.user_id
@@ -185,7 +183,6 @@ async def stream(request: QueryRequest):
 
     chunks: list[dict] = []
     conversational = is_conversational(request.question)
-    # Keep greetings short — do not force document/RAG mode just because a PDF exists
     force_doc_mode = (bool(doc_names) or request.has_documents) and not conversational
     if not conversational:
         chunks = retrieve_chunks_for_question(
@@ -198,7 +195,6 @@ async def stream(request: QueryRequest):
     model = _resolve_model(request.model)
 
     def event_generator():
-        # 1. Emit retrieved chunks for citation sidebar (client parses [CHUNKS])
         if chunks:
             chunk_payload = [
                 {
@@ -214,7 +210,6 @@ async def stream(request: QueryRequest):
         parsed_sections: list[dict] = []
         used_json: list[bool] = []
 
-        # 2. Stream LLM tokens (plain text — matches useStream.ts)
         full_response = ""
         for token in stream_answer(
             request.question,
@@ -231,7 +226,6 @@ async def stream(request: QueryRequest):
 
         json_document_mode = bool(used_json and used_json[0])
 
-        # 3. Inline [Source: ...] only for non-JSON markdown fallbacks / legacy paths
         if not json_document_mode:
             pattern = r'\[Source:\s*([^,\]]+),\s*Page[\s:](\d+)\]'
             matches = re.findall(pattern, full_response)
@@ -260,7 +254,7 @@ async def stream(request: QueryRequest):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-#pdf citation helper
+
 @app.get("/document/{doc_name}/page/{page}")
 async def get_document_page(
     doc_name: str,
@@ -300,11 +294,11 @@ async def get_document_page(
         raise HTTPException(500, f"Failed to load document page: {exc}") from exc
 
 
-
 # ── Feature endpoints ──────────────────────────────────────────────
+
 @app.get("/guidance/{doc_name}")
 async def guidance(doc_name: str, user_id: str, chat_id: str = ""):
-    scope = chat_id if chat_id else user_id  # ✅ same as upload/stream
+    scope = chat_id if chat_id else user_id
     query_vec = embed_query(f"summary overview key points of {doc_name}")
     chunks = query_chunks(query_vec, user_id=scope, top_k=8, source_filter=doc_name)
     if not chunks:
@@ -313,11 +307,9 @@ async def guidance(doc_name: str, user_id: str, chat_id: str = ""):
     return {"doc_name": doc_name, "guidance": report}
 
 
-
-
 @app.get("/analytics/{doc_name}")
 async def analytics(doc_name: str, user_id: str, chat_id: str = ""):
-    scope = chat_id if chat_id else user_id  # ✅ same as upload/stream
+    scope = chat_id if chat_id else user_id
     query_vec = embed_query(f"summary overview key points of {doc_name}")
     chunks = query_chunks(query_vec, user_id=scope, top_k=8, source_filter=doc_name)
     if not chunks:
@@ -326,17 +318,13 @@ async def analytics(doc_name: str, user_id: str, chat_id: str = ""):
     return {"doc_name": doc_name, "analytics": report}
 
 
-    
-
 @app.post("/compare")
 async def compare(request: CompareRequest):
     scope = request.chat_id if request.chat_id else request.user_id
     query_vec = embed_query(request.question)
 
-    chunks_a = query_chunks(query_vec, user_id=scope,
-                            top_k=4, source_filter=request.doc_a)
-    chunks_b = query_chunks(query_vec, user_id=scope,
-                            top_k=4, source_filter=request.doc_b)
+    chunks_a = query_chunks(query_vec, user_id=scope, top_k=4, source_filter=request.doc_a)
+    chunks_b = query_chunks(query_vec, user_id=scope, top_k=4, source_filter=request.doc_b)
 
     if not chunks_a:
         raise HTTPException(404, f"Document '{request.doc_a}' not found.")
@@ -351,29 +339,33 @@ async def compare(request: CompareRequest):
 
 @app.get("/documents")
 def list_documents(user_id: str):
-    """
-    Lists all documents for this user with upload time,
-    last accessed time, and days until auto-deletion.
-    Next.js uses this to populate the document sidebar.
-    """
     docs = list_user_documents(user_id)
     return {"documents": docs}
 
-    
 
 @app.delete("/document/{doc_name}")
 def delete_doc(doc_name: str, user_id: str, chat_id: str = ""):
-    scope = chat_id if chat_id else user_id  # same logic as upload
+    scope = chat_id if chat_id else user_id
     deleted = delete_document(doc_name, scope)
     if deleted == 0:
         raise HTTPException(404, f"Document '{doc_name}' not found.")
     return {"message": f"Deleted '{doc_name}' successfully", "chunks_removed": deleted}
 
 
-
-# fetching pdfs from pinecone
 @app.get("/documents/chat/{chat_id}")
 def get_chat_documents(chat_id: str):
-    """Returns all doc names uploaded in this chat's namespace."""
     return {"documents": list_doc_names_in_namespace(chat_id)}
 
+
+# ── Main Entrypoint Execution Configuration ───────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    
+    # 1. Checks if an environment variable named 'PORT' exists.
+    # 2. Defaults to 8001 if it's absent.
+    target_port = int(os.getenv("PORT", 8001))
+    
+    print(f"📡 Launching OmniMind API on http://0.0.0.0:{target_port}")
+    
+    # Replace "main:app" with your actual file name if it's named differently (e.g., "api:app")
+    uvicorn.run("main:app", host="0.0.0.0", port=target_port, reload=True)
