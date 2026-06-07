@@ -291,9 +291,9 @@ export const deleteEmail = async (userEmail: string, emailId: string) => {
 
 export async function markEmailAsRead(userEmail: string, emailId: string) {
   // Use your real environment URL variable or fallback route
-  const baseUrl = process.env.NEXT_PUBLIC_EMAIL_AGENT_SERVER_URL || 'http://localhost:8000'
+ 
   
-  const response = await fetch(`${baseUrl}/emails/${emailId}/read`, {
+  const response = await fetch(`${getEmailAgentBaseUrl()}/emails/${emailId}/read`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
