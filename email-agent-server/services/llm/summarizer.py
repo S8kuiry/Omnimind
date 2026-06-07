@@ -75,3 +75,12 @@ async def analyze_and_triage_email(subject: str, body: str) -> dict:
             "auto_reply_body": None,
             "latency_ms": int((time.time() - start_time) * 1000)
         }
+
+
+async def summarize_email(subject: str, body: str) -> dict:
+    """Backward-compatible alias used by services/consumer.py."""
+    result = await analyze_and_triage_email(subject, body)
+    return {
+        "summary": result.get("summary", ""),
+        "latency_ms": result.get("latency_ms", 0),
+    }
