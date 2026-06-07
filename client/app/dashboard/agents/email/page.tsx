@@ -13,6 +13,7 @@ import {
   revokeGmailAuth,
   fetchEmailStats,
   syncEmailAgent,
+  getEmailAgentBaseUrl,
 } from "@/lib/automationApi";
 import EmailDashboard from "@/app/components/email-agents/EmailDashboard";
 
@@ -197,7 +198,7 @@ function EmailAgentContent() {
               <div>
                 <h1 className="text-sm font-medium tracking-tight" style={{ color: "rgba(255,255,255,0.88)" }}>Email Agent</h1>
                 <p className="text-[10px] mt-0.5" style={{ color: "rgba(255,255,255,0.28)" }}>
-                  Gmail · Gemini triage · MongoDB · localhost:8000
+                  Gmail · Gemini triage · {getEmailAgentBaseUrl().replace(/^https?:\/\//, '')}
                 </p>
                 <div className="flex items-center gap-2 mt-2">
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider"

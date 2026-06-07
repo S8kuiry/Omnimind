@@ -59,6 +59,8 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadMessage, setLoadMessage] = useState('Syncing inbox from Gmail...')
+  const [inboxError, setInboxError] = useState<string | null>(null)
+  const [lastSyncProcessed, setLastSyncProcessed] = useState<number | null>(null)
   const [category, setCategory] = useState('all')
   const [priority, setPriority] = useState('all')
   const [selected, setSelected] = useState<EmailItem | null>(null)
@@ -74,6 +76,13 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
       }),
       fetchEmailStats(userEmail),
     ])
+    if (emailData.error === 'database_disconnected') {
+      setInboxError('MongoDB is not connected on the email-agent-server. Gmail counts work, but the inbox list is stored in the database — add Atlas network access or check MONGODB_URI on the server.')
+    } else if (emailData.error) {
+      setInboxError('Could not load inbox from the server. Check that the email-agent-server is running.')
+    } else {
+      setInboxError(null)
+    }
     setEmails(emailData.emails ?? [])
     setStats(statsData)
   }, [userEmail, category, priority])
@@ -89,7 +98,13 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
 
     try {
       setLoadMessage('Fetching & triaging emails...')
-      await syncEmailAgent(userEmail)
+      const syncResult = await syncEmailAgent(userEmail)
+      if (syncResult?.sync_processed != null) {
+        setLastSyncProcessed(syncResult.sync_processed)
+      }
+      if (syncResult?.db_connected === false) {
+        setInboxError('MongoDB is not connected on the email-agent-server. Gmail thread counts (201) are live from Google, but emails must be triaged and saved to MongoDB before they appear in this inbox.')
+      }
       setLoadMessage('Loading inbox...')
       await fetchInboxData()
     } finally {
@@ -111,14 +126,23 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
         setLoadMessage('Syncing inbox from Gmail...')
         try {
           setLoadMessage('Fetching & triaging emails...')
-          await syncEmailAgent(userEmail)
+          const syncResult = await syncEmailAgent(userEmail)
           if (cancelled) return
+          if (syncResult?.sync_processed != null) {
+            setLastSyncProcessed(syncResult.sync_processed)
+          }
+          if (syncResult?.db_connected === false) {
+            setInboxError('MongoDB is not connected on the email-agent-server. Gmail thread counts are live from Google, but the inbox list requires MongoDB.')
+          }
           setLoadMessage('Loading inbox...')
           const [emailData, statsData] = await Promise.all([
             fetchEmails(userEmail, { page_size: 40 }),
             fetchEmailStats(userEmail),
           ])
           if (cancelled) return
+          if (emailData.error === 'database_disconnected') {
+            setInboxError('MongoDB is not connected on the email-agent-server. Check MONGODB_URI and Atlas Network Access (allow your IP or 0.0.0.0/0).')
+          }
           setEmails(emailData.emails ?? [])
           setStats(statsData)
           initialSyncDone.current = true
@@ -249,11 +273,23 @@ export default function EmailDashboard({ userEmail }: { userEmail: string }) {
           }}>
           {loading ? (
             <InboxLoader message={loadMessage} />
+          ) : inboxError ? (
+            <div className="flex flex-col items-center justify-center h-48 gap-3 px-6 text-center">
+              <Mail size={22} style={{ color: 'rgba(255,170,0,0.35)' }} />
+              <p className="text-xs leading-relaxed max-w-md" style={{ color: 'rgba(255,190,80,0.85)' }}>
+                {inboxError}
+              </p>
+              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
+                Top stats (monitored threads) come from Gmail directly. This inbox list comes from MongoDB after AI triage.
+              </p>
+            </div>
           ) : emails.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 gap-2.5 px-4">
               <Mail size={22} style={{ color: 'rgba(255,255,255,0.08)' }} />
               <p className="text-xs text-center" style={{ color: 'rgba(255,255,255,0.22)' }}>
-                No processed emails yet — inbox will sync automatically when connected
+                {lastSyncProcessed === 0
+                  ? 'No new unread emails to process — try Refresh or check Gmail filters (only unread inbox messages are synced).'
+                  : 'No processed emails yet — click sync to fetch from Gmail'}
               </p>
             </div>
           ) : (

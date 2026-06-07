@@ -96,8 +96,10 @@ async def manual_email_sync(payload: ManualSyncRequest):
     user_email = payload.user_email
     token = payload.access_token
 
+    sync_processed = 0
     if user_email and is_db_connected():
-        await sync_user_inbox(user_email)
+        sync_result = await sync_user_inbox(user_email)
+        sync_processed = sync_result.get("processed", 0)
         try:
             token = await get_valid_access_token(user_email)
         except ValueError:
@@ -150,6 +152,8 @@ async def manual_email_sync(payload: ManualSyncRequest):
             "spam_blocked": event_stats["spam_blocked"],
             "avg_latency": event_stats["avg_latency"],
             "automation_rate": automation_rate,
+            "db_connected": is_db_connected(),
+            "sync_processed": sync_processed,
         }
 
     except httpx.HTTPStatusError as e:

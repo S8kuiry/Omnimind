@@ -36,7 +36,7 @@ def _get_header(headers: list[dict], name: str) -> str:
     return ""
 
 
-async def fetch_and_queue_new_emails(user_email: str, max_results: int = 15) -> int:
+async def fetch_and_queue_new_emails(user_email: str, max_results: int = 25) -> int:
     """
     Poll Gmail for unread inbox messages and stage new ones in the queue.
     Returns count of newly queued messages.

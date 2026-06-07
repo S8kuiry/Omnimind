@@ -4,7 +4,7 @@ from services.producer import fetch_and_queue_new_emails
 from services.consumer import process_queue_batch
 
 
-async def sync_user_inbox(user_email: str, batch_size: int = 10) -> dict:
+async def sync_user_inbox(user_email: str, batch_size: int = 25) -> dict:
     """
     Full sync: pull unread Gmail messages into the queue, then process up to
     batch_size jobs synchronously (suitable for manual 'Sync now' clicks).
