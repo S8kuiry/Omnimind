@@ -299,6 +299,7 @@ export async function markEmailAsRead(userEmail: string, emailId: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ user_email: userEmail }),
+    ...fetchOpts,
   })
 
   if (!response.ok) {

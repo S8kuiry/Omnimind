@@ -1,19 +1,32 @@
 'use client'
 import { EmailItem } from '@/lib/automationApi'
 
-const PRIORITY_DOT: Record<string, string> = {
-  high:   'rgba(255,100,100,0.9)',
-  medium: 'rgba(255,190,60,0.9)',
-  low:    'rgba(80,210,80,0.8)',
+// Structured styles for the new priority micro-badges
+const PRIORITY_STYLE: Record<string, { text: string; bg: string; border: string }> = {
+  high: {
+    text: 'rgba(255, 100, 100, 0.95)',
+    bg: 'rgba(255, 100, 100, 0.08)',
+    border: 'rgba(255, 100, 100, 0.2)',
+  },
+  medium: {
+    text: 'rgba(255, 190, 60, 0.95)',
+    bg: 'rgba(255, 190, 60, 0.08)',
+    border: 'rgba(255, 190, 60, 0.2)',
+  },
+  low: {
+    text: 'rgba(80, 210, 80, 0.85)',
+    bg: 'rgba(80, 210, 80, 0.08)',
+    border: 'rgba(80, 210, 80, 0.2)',
+  },
 }
 
 const CATEGORY_COLOR: Record<string, string> = {
-  work:       'rgba(100,150,255,0.7)',
-  newsletter: 'rgba(160,160,160,0.5)',
-  bill:       'rgba(255,200,50,0.7)',
-  personal:   'rgba(210,140,160,0.7)',
-  spam:       'rgba(120,120,120,0.4)',
-  critical:   'rgba(255,100,100,0.7)',
+  work:       'rgba(100, 150, 255, 0.7)',
+  newsletter: 'rgba(160, 160, 160, 0.5)',
+  bill:       'rgba(255, 200, 50, 0.7)',
+  personal:   'rgba(210, 140, 160, 0.7)',
+  spam:       'rgba(120, 120, 120, 0.4)',
+  critical:   'rgba(255, 100, 100, 0.7)',
 }
 
 export default function EmailCard({
@@ -22,9 +35,15 @@ export default function EmailCard({
   email: EmailItem
   selected: boolean
   onClick: () => void
-  userEmail: string 
+  userEmail: string
   onUpdate: () => void
 }) {
+  const pStyle = PRIORITY_STYLE[email.priority] || {
+    text: 'rgba(255,255,255,0.4)',
+    bg: 'rgba(255,255,255,0.04)',
+    border: 'rgba(255,255,255,0.1)',
+  }
+
   return (
     <div
       onClick={onClick}
@@ -41,68 +60,76 @@ export default function EmailCard({
         if (!selected) e.currentTarget.style.background = 'transparent'
       }}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-start gap-3">
         
-        {/* Left Status Group: Dynamic Unread Status + Priority Marker */}
-        <div className="flex flex-col items-center gap-1.5 mt-1.5 flex-shrink-0">
-          {/* 🟡 Unread Notification Dot - Disappears completely when email.is_read is true */}
+        {/* Left Section: Dot ONLY represents Unread State */}
+        <div className="mt-1.5 w-1.5 h-1.5 flex-shrink-0 flex items-center justify-center">
           {!email.is_read && (
-            <div 
-              className="w-1.5 h-1.5 rounded-full animate-pulse" 
-              style={{ background: 'rgba(255, 190, 60, 0.95)' }} // High visibility amber/yellow
-              title="Unread message"
+            <div
+              className="w-1.5 h-1.5 rounded-full animate-pulse"
+              style={{ background: 'rgba(255, 190, 60, 0.95)' }} // High-visibility unread yellow
+              title="Unread"
             />
           )}
-          
-          {/* Static Priority Dot */}
-          <div 
-            className="w-1 h-1 rounded-full"
-            style={{ background: PRIORITY_DOT[email.priority] ?? 'rgba(255,255,255,0.2)' }} 
-          />
         </div>
 
+        {/* Right Section: Content Details */}
         <div className="min-w-0 flex-1">
-          {/* Sender + category */}
-          <div className="flex items-center justify-between gap-2 mb-0.5">
-            <span 
-              className="text-xs truncate transition-colors" 
-              style={{ 
-                // Bold and bright if unread; lighter weight and muted if read
+          {/* Sender metadata row */}
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span
+              className="text-xs truncate transition-colors"
+              style={{
                 fontWeight: !email.is_read ? '600' : '400',
-                color: !email.is_read ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.45)' 
+                color: !email.is_read ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.45)',
               }}
             >
               {email.from_name ? email.from_name.trim() : email.from_address}
             </span>
-            <span className="text-[9px] flex-shrink-0 capitalize"
-              style={{ color: CATEGORY_COLOR[email.category] ?? 'rgba(255,255,255,0.3)' }}>
-              {email.category}
-            </span>
+            
+            {/* Categorization & Priority Group tags */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[9px] capitalize tracking-wide"
+                style={{ color: CATEGORY_COLOR[email.category] ?? 'rgba(255,255,255,0.3)' }}>
+                {email.category}
+              </span>
+              
+              {/* Clean text badge replacing the old priority dot */}
+              <span className="text-[8px] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider border"
+                style={{
+                  color: pStyle.text,
+                  background: pStyle.bg,
+                  borderColor: pStyle.border,
+                }}
+              >
+                {email.priority}
+              </span>
+            </div>
           </div>
 
           {/* Subject Line */}
-          <p 
-            className="text-xs truncate mb-1 transition-colors" 
-            style={{ 
+          <p
+            className="text-xs truncate mb-1 transition-colors"
+            style={{
               fontWeight: !email.is_read ? '550' : '400',
-              color: !email.is_read ? 'rgba(255,255,255,0.8)`' : 'rgba(255,255,255,0.35)' 
+              color: !email.is_read ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)',
             }}
           >
             {email.subject}
           </p>
 
-          {/* Summary or snippet */}
-          <p 
-            className="text-[10px] truncate leading-relaxed transition-colors" 
-            style={{ 
-              color: !email.is_read ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.22)' 
+          {/* Summary/Snippet body */}
+          <p
+            className="text-[10px] truncate leading-relaxed transition-colors"
+            style={{
+              color: !email.is_read ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.22)',
             }}
           >
             {email.summary || email.snippet}
           </p>
 
-          {/* Action Badges */}
-          <div className="flex items-center gap-1.5 mt-1.5">
+          {/* System LLM automation status flags */}
+          <div className="flex items-center gap-1.5 mt-2">
             {email.llm_action === 'draft_saved' && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"
                 style={{ background: 'rgba(210,140,160,0.1)', color: 'rgba(210,140,160,0.7)', border: '1px solid rgba(210,140,160,0.2)' }}>

@@ -418,21 +418,32 @@ async def delete_email(email_id: str, user_email: str = Query(...)):
 
 
 # ── PATCH /emails/{id}/read ────────────────────────────────────────────
-@router.patch("/emails/{email_id}/read")
-async def mark_as_read(email_id: str, payload: dict):
-    user_email = payload.get("user_email")
-    emails_col = get_collection("emails")
-    
-    result = await emails_col.update_one(
-        {"_id": ObjectId(email_id), "user_email": user_email},
-        {"$set": {"is_read": True}}
+
+class MarkReadRequest(BaseModel):
+    user_email: str
+
+
+@router.patch("/{email_id}/read")
+async def mark_as_read(email_id: str, req: MarkReadRequest):
+    if not is_db_connected():
+        raise HTTPException(503, "Database not connected")
+
+    col = get_collection("emails")
+
+    try:
+        oid = ObjectId(email_id)
+    except Exception:
+        raise HTTPException(400, "Invalid email ID format")
+
+    result = await col.update_one(
+        {"_id": oid, "user_email": req.user_email, "is_trashed": {"$ne": True}},
+        {"$set": {"is_read": True}},
     )
-    
+
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Email document not found")
-        
+        raise HTTPException(404, "Email not found")
+
     return {"status": "success", "message": "Email marked as read"}
-    
 
 
 # ── Internal helpers ───────────────────────────────────────────────
