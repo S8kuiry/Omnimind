@@ -453,10 +453,12 @@ def fetch_old_unread_messages(
 
 
 def batch_move_to_trash(creds: Credentials, message_ids: list[str]) -> None:
+    """Move messages to Gmail Trash (API has no batchTrash — trash one at a time)."""
     if not message_ids:
         return
     service = _build_service(creds)
-    service.users().messages().batchTrash(userId="me", body={"ids": message_ids}).execute()
+    for msg_id in message_ids:
+        service.users().messages().trash(userId="me", id=msg_id).execute()
 
 
 
