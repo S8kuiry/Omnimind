@@ -18,14 +18,73 @@ Live stat bar uses WS metrics_updated events instead of polling here.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Body
+from pydantic import BaseModel, Field
 
-from models.user import find_user_by_email
+from models.user import (
+    find_user_by_email,
+    get_cleanup_settings,
+    update_cleanup_settings,
+)
 from models.metrics_daily import get_rollup, get_today
 
 logger = logging.getLogger("routes.agent")
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+class CleanupSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    older_than_days: int | None = Field(None, ge=7, le=365)
+
+
+@router.get("/email/cleanup-settings")
+async def get_cleanup_settings_route(user_email: str = Query(...)):
+    """Return per-user inbox cleanup preferences."""
+    if not user_email:
+        raise HTTPException(status_code=400, detail="user_email is required")
+
+    user = await find_user_by_email(user_email)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"No account found for {user_email}")
+
+    settings = get_cleanup_settings(user)
+    return {
+        "enabled": settings["enabled"],
+        "older_than_days": settings["older_than_days"],
+    }
+
+
+@router.patch("/email/cleanup-settings")
+async def patch_cleanup_settings_route(
+    user_email: str = Query(...),
+    body: CleanupSettingsUpdate = Body(...),
+):
+    """Update per-user inbox cleanup preferences."""
+    if not user_email:
+        raise HTTPException(status_code=400, detail="user_email is required")
+
+    user = await find_user_by_email(user_email)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"No account found for {user_email}")
+
+    try:
+        updated = await update_cleanup_settings(
+            user_email,
+            enabled=body.enabled,
+            older_than_days=body.older_than_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not updated and (body.enabled is not None or body.older_than_days is not None):
+        raise HTTPException(status_code=500, detail="Failed to update cleanup settings")
+
+    settings = get_cleanup_settings(await find_user_by_email(user_email) or user)
+    return {
+        "enabled": settings["enabled"],
+        "older_than_days": settings["older_than_days"],
+    }
 
 
 @router.get("/email")
@@ -62,6 +121,7 @@ async def get_email_agent_overview(
         "manual_attention_historical_total": rollup.get("attention_queued", 0),
         "user_reviewed_total": rollup.get("user_reviewed", 0),
         "user_replied_total": rollup.get("user_replied", 0),
+        "inbox_cleaned_total": rollup.get("inbox_cleaned", 0),
         "automation_rate": rollup.get("automation_rate", 0.0),
         "period_days": period,
 
@@ -69,6 +129,7 @@ async def get_email_agent_overview(
         "auto_resolved_today": today.get("auto_resolved", 0),
         "spam_blocked_today": today.get("spam_blocked", 0),
         "attention_queued_today": today.get("attention_queued", 0),
+        "inbox_cleaned_today": today.get("inbox_cleaned", 0),
         "auto_send_count_today": today.get("auto_send_count", 0),
         "auto_ack_count_today": today.get("auto_ack_count", 0),
     }

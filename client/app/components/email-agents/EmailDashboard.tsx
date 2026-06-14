@@ -98,6 +98,7 @@ function metricsFromWS(payload: MetricsUpdatedPayload): Partial<EmailStats> {
     manualAttentionTotal: payload.manual_attention_historical_total,
     automationRate: payload.automation_rate,
     autoSendCountToday: payload.auto_send_count_today,
+    inboxCleanedTotal: payload.inbox_cleaned_total,
     today_processed: payload.auto_replies_total + payload.system_dropped_total,
   }
 }

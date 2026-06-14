@@ -432,12 +432,21 @@ def send_gmail_reply(creds: Credentials, message_id: str, body: str):
     return service.users().messages().send(userId="me", body=payload).execute()
 
 
-def fetch_old_unread_messages(creds: Credentials, batch_size: int) -> list[str]:
-    """Unread messages older than 2 months, excluding Attention-labeled mail."""
+def fetch_old_unread_messages(
+    creds: Credentials,
+    batch_size: int,
+    older_than_days: int = 60,
+) -> list[str]:
+    """Unread inbox mail older than N days, excluding OmniMind labels."""
+    days = max(7, min(365, int(older_than_days)))
     service = _build_service(creds)
+    query = (
+        f"is:unread in:inbox older_than:{days}d "
+        f"-label:OmniMind/Attention -label:OmniMind/Processed"
+    )
     result = service.users().messages().list(
         userId="me",
-        q="is:unread older_than:2m -label:OmniMind-Attention",
+        q=query,
         maxResults=batch_size,
     ).execute()
     return [m["id"] for m in result.get("messages", [])]
@@ -487,3 +496,17 @@ def _parse_from_header(from_raw: str) -> tuple[str, str]:
         address = from_raw[from_raw.index("<") + 1: from_raw.index(">")].strip()
         return name, address.lower()
     return "", from_raw.strip().lower()
+
+    
+# auto cleanup
+
+def fetch_old_unread_messages(creds: Credentials, batch_size: int, older_than_days: int = 60) -> list[str]:
+    """Unread messages older than `older_than_days`, excluding OmniMind-managed labels."""
+    service = _build_service(creds)
+    q = f"is:unread older_than:{older_than_days}d {UNTRIAGED_FILTER}"
+    result = service.users().messages().list(
+        userId="me",
+        q=q,
+        maxResults=batch_size,
+    ).execute()
+    return [m["id"] for m in result.get("messages", [])]

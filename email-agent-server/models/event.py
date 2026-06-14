@@ -67,6 +67,9 @@ _METRIC_MAP: dict[str, dict[str, int]] = {
     "user_replied": {
         "user_replied": 1,
     },
+    "inbox_cleaned": {
+        "inbox_cleaned": 1,
+    },
 }
 
 # ── Index setup ────────────────────────────────────────────────────

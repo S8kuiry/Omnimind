@@ -211,6 +211,7 @@ async def _broadcast_metrics(user_email: str) -> None:
     """
     try:
         today = await get_today(user_email)
+        rollup = await get_rollup(user_email, n_days=7)
         active_cards = len(attention_cache.get_emails(user_email) or [])
         stats = session_stats.get_stats(user_email)
 
@@ -228,6 +229,7 @@ async def _broadcast_metrics(user_email: str) -> None:
                     "manual_attention_historical_total": today.get("attention_queued", 0),
                     "current_active_buffer_cards": active_cards,
                     "automation_rate": rate,
+                    "inbox_cleaned_total": rollup.get("inbox_cleaned", 0),
                 },
             },
         )
@@ -300,12 +302,14 @@ async def email_stats(
         "auto_replies_total": rollup.get("auto_resolved", 0),
         "system_dropped_total": rollup.get("spam_blocked", 0),
         "manual_attention_historical_total": rollup.get("attention_queued", 0),
+        "inbox_cleaned_total": rollup.get("inbox_cleaned", 0),
         "automation_rate": rollup.get("automation_rate", 0.0),
 
         # Today breakdown
         "auto_resolved_today": today.get("auto_resolved", 0),
         "spam_blocked_today": today.get("spam_blocked", 0),
         "attention_queued_today": today.get("attention_queued", 0),
+        "inbox_cleaned_today": today.get("inbox_cleaned", 0),
         "auto_send_count_today": today.get("auto_send_count", 0),
         "auto_ack_count_today": today.get("auto_ack_count", 0),
         "automation_rate_today": rate,

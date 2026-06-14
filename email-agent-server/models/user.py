@@ -9,6 +9,9 @@ logger = logging.getLogger("models_user")
 COLLECTION = "email_agent_users"
 _memory_users: dict[str, dict] = {}
 
+DEFAULT_CLEANUP_SETTINGS = {"enabled": True, "older_than_days": 60}
+
+
 
 def get_user_collection():
     return get_collection(COLLECTION)
@@ -115,3 +118,79 @@ async def update_gmail_history_id(email: str, history_id: str) -> bool:
         {"$set": {"gmail_history_id": history_id}},
     )
     return result.modified_count > 0
+
+
+# auto cleanup settings
+def get_cleanup_settings(user: dict) -> dict:
+    settings = user.get("cleanup_settings") or {}
+    return {
+        "enabled": settings.get("enabled", DEFAULT_CLEANUP_SETTINGS["enabled"]),
+        "older_than_days": settings.get("older_than_days", DEFAULT_CLEANUP_SETTINGS["older_than_days"]),
+    }
+
+
+async def update_cleanup_settings(
+    email: str,
+    enabled: bool | None = None,
+    older_than_days: int | None = None,
+) -> bool:
+    update_fields: dict = {}
+    if enabled is not None:
+        update_fields["cleanup_settings.enabled"] = enabled
+    if older_than_days is not None:
+        if not (7 <= older_than_days <= 365):
+            raise ValueError("older_than_days must be between 7 and 365")
+        update_fields["cleanup_settings.older_than_days"] = older_than_days
+
+    if not update_fields:
+        return False
+
+    if not is_db_connected():
+        user = _memory_users.get(email)
+        if not user:
+            return False
+        cleanup = user.setdefault("cleanup_settings", {})
+        if enabled is not None:
+            cleanup["enabled"] = enabled
+        if older_than_days is not None:
+            cleanup["older_than_days"] = older_than_days
+        return True
+
+    result = await get_user_collection().update_one(
+        {"email": email},
+        {"$set": update_fields},
+        upsert=False,
+    )
+    return result.matched_count > 0
+
+
+async def update_gmail_watch_state(
+    email: str,
+    *,
+    history_id: str | None = None,
+    expiry_ms: int | None = None,
+) -> bool:
+    """Persist Gmail Push watch metadata on the user document."""
+    fields: dict = {}
+    if history_id is not None:
+        fields["gmail_history_id"] = history_id
+    if expiry_ms is not None:
+        fields["gmail_watch_expiry_ms"] = expiry_ms
+    if not fields:
+        return False
+
+    from datetime import datetime, timezone
+    fields["gmail_watch_registered_at"] = datetime.now(timezone.utc)
+
+    if not is_db_connected():
+        user = _memory_users.get(email)
+        if not user:
+            return False
+        user.update(fields)
+        return True
+
+    result = await get_user_collection().update_one(
+        {"email": email},
+        {"$set": fields},
+    )
+    return result.modified_count > 0 or result.matched_count > 0

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Frontend
     frontend_url: str = "http://localhost:3000"
+    cors_extra_origins: str = ""  # comma-separated extra allowed origins
 
     # Security
     secret_key: str
@@ -48,6 +49,11 @@ class Settings(BaseSettings):
     # Cleanup engine
     cleanup_batch_size: int = 50
     cleanup_interval_seconds: int = 3600
+
+    # DB retention (MongoDB only — does not touch Gmail)
+    db_retention_days: int = 60
+    db_retention_interval_seconds: int = 86400  # once per day
+    db_retention_batch_size: int = 500
 
     # Pipeline concurrency — max emails processed in parallel per ingest cycle
     llm_concurrency: int = 3

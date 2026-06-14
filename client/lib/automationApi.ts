@@ -82,6 +82,8 @@ export interface EmailStats {
   attentionQueuedToday?: number
   autoSendCountToday?: number
   autoAckCountToday?: number
+  inboxCleanedTotal?: number
+  inboxCleanedToday?: number
   /** @deprecated use activeCards */
   total: number
   unread: number
@@ -138,6 +140,7 @@ export interface MetricsUpdatedPayload {
   manual_attention_historical_total: number
   current_active_buffer_cards: number
   automation_rate: number
+  inbox_cleaned_total?: number
   auto_send_count_today?: number
 }
 
@@ -236,7 +239,11 @@ export function subscribeEmailStream(
   }
 }
 
-// ── Normalizers ────────────────────────────────────────────────────
+export interface CleanupSettings {
+  enabled: boolean
+  olderThanDays: number
+}
+
 
 export function isSystemDropEmail(
   email: Pick<EmailItem, 'from_address' | 'from_name' | 'subject' | 'snippet' | 'body_text' | 'summary'>
@@ -317,6 +324,8 @@ function normalizeEmailStats(raw: Record<string, unknown>): EmailStats {
     attentionQueuedToday: Number(raw.attention_queued_today ?? 0),
     autoSendCountToday: Number(raw.auto_send_count_today ?? 0),
     autoAckCountToday: Number(raw.auto_ack_count_today ?? 0),
+    inboxCleanedTotal: Number(raw.inbox_cleaned_total ?? 0),
+    inboxCleanedToday: Number(raw.inbox_cleaned_today ?? 0),
     total: active,
     unread: active,
     critical_unread: Number(raw.critical_unread ?? 0),
@@ -451,6 +460,56 @@ export async function fetchAgentOverview(userEmail: string): Promise<EmailStats 
     if (!res.ok) return null
     const raw = await res.json()
     return normalizeEmailStats(raw)
+  } catch {
+    return null
+  }
+}
+
+export async function fetchCleanupSettings(
+  userEmail: string
+): Promise<CleanupSettings | null> {
+  try {
+    const params = new URLSearchParams({ user_email: userEmail })
+    const res = await fetch(
+      `${getEmailAgentBaseUrl()}/agents/email/cleanup-settings?${params}`,
+      fetchOpts
+    )
+    if (!res.ok) return null
+    const raw = await res.json()
+    return {
+      enabled: Boolean(raw.enabled),
+      olderThanDays: Number(raw.older_than_days ?? 60),
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function updateCleanupSettings(
+  userEmail: string,
+  patch: { enabled?: boolean; olderThanDays?: number }
+): Promise<CleanupSettings | null> {
+  try {
+    const params = new URLSearchParams({ user_email: userEmail })
+    const body: Record<string, unknown> = {}
+    if (patch.enabled !== undefined) body.enabled = patch.enabled
+    if (patch.olderThanDays !== undefined) body.older_than_days = patch.olderThanDays
+
+    const res = await fetch(
+      `${getEmailAgentBaseUrl()}/agents/email/cleanup-settings?${params}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        ...fetchOpts,
+      }
+    )
+    if (!res.ok) return null
+    const raw = await res.json()
+    return {
+      enabled: Boolean(raw.enabled),
+      olderThanDays: Number(raw.older_than_days ?? 60),
+    }
   } catch {
     return null
   }

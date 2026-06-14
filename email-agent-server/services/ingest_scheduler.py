@@ -23,16 +23,13 @@ from lib.gmail_client import fetch_messages_for_triage
 
 logger = logging.getLogger("ingest_scheduler")
 
-# ── Notification slots (UTC hour, minute, label, subject prefix) ───
-# IST = UTC + 5:30
+# Notification slots (UTC hour, minute, label, subject prefix)
 NOTIFICATION_SLOTS = [
-    (2,  30, "morning", "☀️ Yesterday's"),   # 08:00 IST — overnight digest
-    (12, 30, "evening", "🌆 Today's"),        # 18:00 IST — workday snapshot
-    (18,  0, "night",   "🌙 Final Daily"),    # 23:30 IST — end-of-day tally
+    (2,  30, "morning", "☀️ Yesterday's"),   # 08:00 IST
+    (12, 30, "evening", "🌆 Today's"),        # 18:00 IST
+    (18,  0, "night",   "🌙 Final Daily"),    # 23:30 IST
 ]
 
-
-# ── Ingest ─────────────────────────────────────────────────────────
 
 async def run_ingest_for_user(user: dict) -> None:
     user_email = user.get("email")
@@ -120,13 +117,7 @@ async def _run_all_users() -> None:
             logger.error(f"[ingest] Unhandled error for {user.get('email')}: {e}")
 
 
-# ── Notifications ──────────────────────────────────────────────────
-
 def _next_trigger_seconds(hour_utc: int, minute_utc: int) -> float:
-    """
-    Returns seconds until the next occurrence of (hour_utc, minute_utc).
-    If the time already passed today, schedules for tomorrow.
-    """
     now = datetime.now(timezone.utc)
     target_today = now.replace(hour=hour_utc, minute=minute_utc, second=0, microsecond=0)
     target = target_today if now < target_today else target_today + timedelta(days=1)
@@ -138,13 +129,6 @@ async def _send_notification_for_user(
     slot_label: str,
     subject_prefix: str,
 ) -> None:
-    """
-    Fetch the right metrics for this slot and email them to the user.
-
-    morning → yesterday's complete data   (day is fully over, clean numbers)
-    evening → today so far                (workday snapshot)
-    night   → today's final tally         (day essentially complete at 11:30pm)
-    """
     from routes.notifications import send_gmail_sync, generate_metrics_html
     from models.metrics_daily import get_today, get_last_n_days
 
@@ -160,17 +144,14 @@ async def _send_notification_for_user(
 
     try:
         if slot_label == "morning":
-            # Pull yesterday — index 0 is oldest when n=2, so [0] = yesterday
             days = await get_last_n_days(user_email, n=2)
             raw = days[0] if days else {}
         else:
-            # Evening snapshot + night final both use today's live counters
             raw = await get_today(user_email)
 
-        # Normalise field names to match generate_metrics_html expectations
         stats = {
-            "auto_replies_total":               raw.get("auto_resolved", 0),
-            "system_dropped_total":             raw.get("spam_blocked", 0),
+            "auto_replies_total": raw.get("auto_resolved", 0),
+            "system_dropped_total": raw.get("spam_blocked", 0),
             "manual_attention_historical_total": raw.get("attention_queued", 0),
         }
 
@@ -214,11 +195,6 @@ async def _send_slot_to_all_users(slot_label: str, subject_prefix: str) -> None:
 
 
 async def _notification_scheduler() -> None:
-    """
-    Launches 3 independent slot tasks in parallel.
-    Each slot sleeps until its next UTC time, fires, then repeats every 24h.
-    If one slot crashes it doesn't affect the others.
-    """
     async def _run_slot(hour: int, minute: int, label: str, prefix: str) -> None:
         while True:
             wait = _next_trigger_seconds(hour, minute)
@@ -229,7 +205,6 @@ async def _notification_scheduler() -> None:
             logger.info(f"[notify] Firing {label} slot")
             await _send_slot_to_all_users(label, prefix)
 
-            # Sleep 23h 55m — wakes up just before next trigger, avoids drift
             await asyncio.sleep(23 * 3600 + 55 * 60)
 
     await asyncio.gather(*[
@@ -238,23 +213,11 @@ async def _notification_scheduler() -> None:
     ], return_exceptions=True)
 
 
-# ── Main entry point ───────────────────────────────────────────────
-
 async def start_ingest_scheduler() -> None:
-    """
-    Starts two concurrent infinite loops:
-      1. _ingest_loop        — every 15 min
-      2. _notification_scheduler — 3 daily slots (8am, 6pm, 11:30pm IST)
-
-    Called once from main.py lifespan:
-        asyncio.create_task(start_ingest_scheduler())
-    """
     interval = getattr(settings, "ingest_interval_seconds", 900)
 
-    # Log all slot times clearly on startup
     logger.info(f"[ingest] Scheduler started — interval {interval}s ({interval // 60} min)")
     for hour, minute, label, _ in NOTIFICATION_SLOTS:
-        # Convert UTC → IST for the log message
         ist_hour = (hour + 5) % 24
         ist_minute = (minute + 30) % 60
         if minute + 30 >= 60:
@@ -278,8 +241,6 @@ async def start_ingest_scheduler() -> None:
             logger.info(f"[ingest] Cycle done in {elapsed:.1f}s — sleeping {sleep_for:.0f}s")
             await asyncio.sleep(sleep_for)
 
-    # Both loops run forever — if gather catches an exception from one,
-    # return_exceptions=True keeps the other running
     await asyncio.gather(
         _ingest_loop(),
         _notification_scheduler(),

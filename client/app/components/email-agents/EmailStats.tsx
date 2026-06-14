@@ -37,9 +37,9 @@ export default function EmailStatsBar({ stats }: { stats: EmailStats }) {
 
   return (
     <div
-      className="grid flex-shrink-0 "
+      className="grid flex-shrink-0"
       style={{
-        gridTemplateColumns: `repeat(${items.length}, 1fr)`,
+        gridTemplateColumns: 'repeat(6, 1fr)',
         background: 'rgba(255,255,255,0.04)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.21)',
         gap: '1px',

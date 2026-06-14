@@ -15,13 +15,10 @@ The 15-min cron is the fallback safety net.
 import asyncio
 import logging
 
-from db.mongodb import get_collection
 from lib.google_client import get_gmail_credentials
-from models.user import find_user_by_email
+from models.user import find_user_by_email, update_gmail_history_id
 
 logger = logging.getLogger("gmail_push_handler")
-
-USERS_COLLECTION = "users"
 
 
 async def handle_gmail_push(user_email: str, history_id: str) -> None:
@@ -119,11 +116,7 @@ async def handle_gmail_push(user_email: str, history_id: str) -> None:
 async def _update_history_id(user_email: str, history_id: str) -> None:
     """Persist the latest history_id so next push knows where to start."""
     try:
-        col = get_collection(USERS_COLLECTION)
-        await col.update_one(
-            {"email": user_email},
-            {"$set": {"gmail_history_id": history_id}},
-        )
+        await update_gmail_history_id(user_email, history_id)
     except Exception as e:
         logger.error(f"[push] Failed to update history_id for {user_email}: {e}")
 

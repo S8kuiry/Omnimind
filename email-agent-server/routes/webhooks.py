@@ -50,7 +50,6 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
     Always returns 200 — GCP retries on any other status.
     Real processing happens in background via gmail_push_handler.
     """
-    # Import here to avoid circular imports at module load time
     from services.gmail_push_handler import handle_gmail_push
 
     try:
@@ -91,3 +90,16 @@ async def gmail_push_webhook(request: Request, background_tasks: BackgroundTasks
     background_tasks.add_task(handle_gmail_push, user_email, str(history_id))
 
     return Response(status_code=200)
+
+
+@router.get("/gmail")
+async def gmail_webhook_health():
+    """
+    Health check for Gmail Pub/Sub push subscription setup.
+    GCP pushes POST to this path; GET is for manual verification.
+    """
+    return {
+        "status": "ok",
+        "endpoint": "POST /webhooks/gmail",
+        "note": "Gmail Pub/Sub push notifications wake this service on Render",
+    }

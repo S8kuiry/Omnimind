@@ -42,6 +42,8 @@ COUNTER_FIELDS = [
     "auto_ack_count",
     "user_reviewed",
     "user_replied",
+    "inbox_cleaned",
+
 ]
 
 # ── Index setup ────────────────────────────────────────────────────

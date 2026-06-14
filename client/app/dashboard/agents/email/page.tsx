@@ -7,6 +7,7 @@ import {
   Mail, ShieldCheck, RefreshCw, XCircle,
   Inbox, CheckCircle2, AlertCircle, ArrowRight, Wifi, WifiOff,
   FileEdit, ShieldAlert, BarChart3,
+  Trash2,
 } from "lucide-react";
 import {
   getGmailAuthUrl,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/automationApi";
 import { loadMetrics, saveMetrics } from "@/lib/metricsStorage";
 import EmailDashboard from "@/app/components/email-agents/EmailDashboard";
+import CleanupSettingsPanel from "@/app/components/email-agents/CleanupSettingsPanel";
 
 type StatCard = {
   icon: React.ElementType;
@@ -33,6 +35,8 @@ interface StatsState {
   draftsCreated: string;
   spamBlocked: string;
   automationRate: string;
+  inboxCleaned: string; // ADD
+
 }
 
 function EmailAgentContent() {
@@ -111,6 +115,7 @@ function EmailAgentContent() {
       draftsCreated: String(bufferStats.manualAttentionTotal),
       spamBlocked: String(bufferStats.systemDroppedTotal),
       automationRate: String(automationRate),
+      inboxCleaned: String(bufferStats.inboxCleanedTotal ?? 0), // ADD
     });
   }, []);
 
@@ -123,8 +128,14 @@ function EmailAgentContent() {
         fetchAgentOverview(userEmail),
       ]);
 
-      const merged = statsData ?? overview;
-      if (merged) {
+      if (statsData || overview) {
+        const merged: EmailStats = {
+          ...(overview ?? {}),
+          ...(statsData ?? {}),
+          inboxCleanedTotal:
+            overview?.inboxCleanedTotal ?? statsData?.inboxCleanedTotal ?? 0,
+          activeCards: statsData?.activeCards ?? overview?.activeCards ?? 0,
+        } as EmailStats;
         applyStats(merged);
         saveMetrics(userEmail, merged);
       }
@@ -173,12 +184,15 @@ function EmailAgentContent() {
     padding: "20px",
   };
 
+
   const STAT_CARDS: StatCard[] = [
-    { icon: Inbox,       label: "active queue",    value: stats.total,          sub: "emails needing review" },
-    { icon: FileEdit,    label: "staged drafts",   value: stats.draftsCreated,  sub: "routed to attention queue" },
-    { icon: CheckCircle2,label: "auto-resolved",   value: stats.resolved,       sub: "handled without you" },
-    { icon: ShieldAlert, label: "spam blocked",    value: stats.spamBlocked,    sub: "filtered by agent" },
-    { icon: BarChart3,   label: "automation rate", value: `${stats.automationRate}%`, sub: "hands-off yield" },
+    { icon: Inbox, label: "active queue", value: stats.total, sub: "emails needing review" },
+    { icon: FileEdit, label: "staged drafts", value: stats.draftsCreated, sub: "routed to attention queue" },
+    { icon: CheckCircle2, label: "auto-resolved", value: stats.resolved, sub: "handled without you" },
+    { icon: ShieldAlert, label: "spam blocked", value: stats.spamBlocked, sub: "filtered by agent" },
+    { icon: BarChart3, label: "automation rate", value: `${stats.automationRate}%`, sub: "hands-off yield" },
+    { icon: Trash2, label: "inbox cleaned", value: stats.inboxCleaned, sub: "old unread auto-trashed" }, // ADD
+
   ];
 
   return (
@@ -238,10 +252,10 @@ function EmailAgentContent() {
                     e.currentTarget.style.borderColor = "rgba(210,140,160,0.25)"
                   }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" />
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
                   </svg>
                   Connect Gmail
                 </button>
@@ -272,9 +286,16 @@ function EmailAgentContent() {
           </div>
         )}
 
+
+
+        {/* NEW: Cleanup settings panel — only when connected */}
+        {isConnected && email && (
+          <CleanupSettingsPanel userEmail={email} />
+        )}
+
         {/* Stat cards */}
         {isConnected && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-2.5">
             {statsLoading && !stats.resolved && (
               <div className="col-span-full flex items-center justify-center gap-2 py-3 rounded-xl"
                 style={{ background: 'rgba(210,140,160,0.04)', border: '1px solid rgba(210,140,160,0.12)' }}>
@@ -284,6 +305,7 @@ function EmailAgentContent() {
                 </span>
               </div>
             )}
+
             {STAT_CARDS.map(({ icon: Icon, label, value, sub }) => (
               <div key={label} style={card}>
                 <div className="flex items-center gap-1.5 mb-2" style={{ color: "rgba(255,255,255,0.25)" }}>
@@ -299,6 +321,9 @@ function EmailAgentContent() {
           </div>
         )}
 
+
+
+
         {/* Dashboard */}
         {isConnected && email && (
           <EmailDashboard
@@ -313,7 +338,7 @@ function EmailAgentContent() {
 }
 
 function emptyStats(): StatsState {
-  return { total: "—", resolved: "—", draftsCreated: "0", spamBlocked: "0", automationRate: "0" };
+  return { total: "0", resolved: "0", draftsCreated: "0", spamBlocked: "0", automationRate: "0", inboxCleaned: "0" };
 }
 
 export default function EmailAgentDashboard() {
