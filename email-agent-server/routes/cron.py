@@ -1,9 +1,11 @@
 """
-routes/cron.py — Manual Ingest Trigger
+routes/cron.py — External cron triggers
 
-POST /cron/ingest  — triggers one full ingest cycle manually (admin/debug only)
+GET /cron/daily  — Gmail cleanup + DB retention + final daily stats email
+                   (runs synchronously; point cron-job.org here at 18:00 UTC)
 
-Normal ingest runs automatically every 15 minutes via ingest_scheduler.py.
+POST /cron/ingest — manual ingest for one user (debug)
+GET  /cron/status — per-user metrics snapshot (debug)
 """
 
 import logging
@@ -11,9 +13,27 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from models.user import find_user_by_email
+from services.daily_jobs import run_daily_jobs
 
 logger = logging.getLogger("routes.cron")
 router = APIRouter(prefix="/cron", tags=["cron"])
+
+
+@router.get("/daily")
+async def trigger_daily_jobs():
+    """
+    Daily maintenance bundle for Render free tier.
+
+    Pub/Sub handles live mail ingest while the server is awake.
+    External cron (cron-job.org) should call this once per day at 18:00 UTC
+    (23:30 IST) so all work completes inside the active request window.
+    """
+    try:
+        results = await run_daily_jobs()
+        return {"status": "ok", "results": results}
+    except Exception as exc:
+        logger.error(f"[cron] Daily jobs failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/ingest")

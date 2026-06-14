@@ -24,6 +24,7 @@ def generate_metrics_html(email: str, stats: dict) -> str:
     auto_replies = stats.get("auto_replies_total", 0)
     system_dropped = stats.get("system_dropped_total", 0)
     manual_attention = stats.get("manual_attention_historical_total", 0)
+    inbox_cleaned = stats.get("inbox_cleaned_total", 0)
     total_processed = auto_replies + system_dropped + manual_attention
     
     automation_rate = (
@@ -75,7 +76,14 @@ def generate_metrics_html(email: str, stats: dict) -> str:
                             <td width="4%"></td>
                             <td width="48%" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 16px; border-radius: 12px; text-align: center;">
                                 <span style="font-size: 20px; font-weight: bold; color: #fff; display: block;">{total_processed}</span>
-                                <span style="font-size: 11px; color: rgba(255,255,255,0.4); display: block; margin-top: 4px;">Total Ingested</span>
+                                <span style="font-size: 11px; color: rgba(255,255,255,0.4); display: block; margin-top: 4px;">Total Processed</span>
+                            </td>
+                        </tr>
+                        <tr><td height="12" colspan="3"></td></tr>
+                        <tr>
+                            <td colspan="3" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 16px; border-radius: 12px; text-align: center;">
+                                <span style="font-size: 20px; font-weight: bold; color: #d28ca0; display: block;">{inbox_cleaned}</span>
+                                <span style="font-size: 11px; color: rgba(255,255,255,0.4); display: block; margin-top: 4px;">Inbox Cleaned Today</span>
                             </td>
                         </tr>
                     </table>
