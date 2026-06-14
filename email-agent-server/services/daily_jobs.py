@@ -20,8 +20,8 @@ from models.event import log_agent_event
 from models.metrics_daily import get_today
 from models.user import list_users_with_gmail_tokens, get_cleanup_settings
 from routes.emails import _broadcast_metrics
-from routes.notifications import generate_metrics_html, send_gmail_sync
 from services.db_retention import run_db_retention_once
+from services.stats_email import generate_metrics_html, send_gmail_sync
 
 logger = logging.getLogger("daily_jobs")
 
