@@ -496,17 +496,3 @@ def _parse_from_header(from_raw: str) -> tuple[str, str]:
         address = from_raw[from_raw.index("<") + 1: from_raw.index(">")].strip()
         return name, address.lower()
     return "", from_raw.strip().lower()
-
-    
-# auto cleanup
-
-def fetch_old_unread_messages(creds: Credentials, batch_size: int, older_than_days: int = 60) -> list[str]:
-    """Unread messages older than `older_than_days`, excluding OmniMind-managed labels."""
-    service = _build_service(creds)
-    q = f"is:unread older_than:{older_than_days}d {UNTRIAGED_FILTER}"
-    result = service.users().messages().list(
-        userId="me",
-        q=q,
-        maxResults=batch_size,
-    ).execute()
-    return [m["id"] for m in result.get("messages", [])]
