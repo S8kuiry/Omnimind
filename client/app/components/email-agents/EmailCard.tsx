@@ -30,14 +30,16 @@ const CATEGORY_COLOR: Record<string, string> = {
 }
 
 export default function EmailCard({
-  email, selected, onClick, userEmail, onUpdate,
+  email, selected, onClick, readOnly = false,
 }: {
   email: EmailItem
   selected: boolean
   onClick: () => void
-  userEmail: string
-  onUpdate: () => void
+  userEmail?: string
+  readOnly?: boolean
 }) {
+  const isAutoReplied = readOnly || email.llm_action === 'auto_replied'
+  const isUnread = !isAutoReplied && !email.is_read
   const pStyle = PRIORITY_STYLE[email.priority] || {
     text: 'rgba(255,255,255,0.4)',
     bg: 'rgba(255,255,255,0.04)',
@@ -62,15 +64,21 @@ export default function EmailCard({
     >
       <div className="flex items-start gap-3">
         
-        {/* Left Section: Dot ONLY represents Unread State */}
+        {/* Left Section: pulse dot = unread; green = auto-replied; empty when read */}
         <div className="mt-1.5 w-1.5 h-1.5 flex-shrink-0 flex items-center justify-center">
-          {!email.is_read && (
+          {isAutoReplied ? (
+            <div
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: 'rgba(100, 220, 130, 0.95)' }}
+              title="Auto-replied"
+            />
+          ) : isUnread ? (
             <div
               className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: 'rgba(255, 190, 60, 0.95)' }} // High-visibility unread yellow
+              style={{ background: 'rgba(255, 190, 60, 0.95)' }}
               title="Unread"
             />
-          )}
+          ) : null}
         </div>
 
         {/* Right Section: Content Details */}
@@ -80,8 +88,8 @@ export default function EmailCard({
             <span
               className="text-xs truncate transition-colors"
               style={{
-                fontWeight: !email.is_read ? '600' : '400',
-                color: !email.is_read ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.45)',
+                fontWeight: isUnread ? '600' : '400',
+                color: isUnread ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.45)',
               }}
             >
               {email.from_name ? email.from_name.trim() : email.from_address}
@@ -111,8 +119,8 @@ export default function EmailCard({
           <p
             className="text-xs truncate mb-1 transition-colors"
             style={{
-              fontWeight: !email.is_read ? '550' : '400',
-              color: !email.is_read ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)',
+              fontWeight: isUnread ? '550' : '400',
+              color: isUnread ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)',
             }}
           >
             {email.subject}
@@ -121,25 +129,29 @@ export default function EmailCard({
           {/* Summary/Snippet body */}
           <p
             className="text-[10px] truncate leading-relaxed transition-colors"
-            style={{
-              color: !email.is_read ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.22)',
-            }}
+            style={{ color: isUnread ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.22)' }}
           >
-            {email.summary || email.snippet}
+            {isAutoReplied ? (email.reply_preview || email.snippet) : (email.summary || email.snippet)}
           </p>
 
           {/* System LLM automation status flags */}
           <div className="flex items-center gap-1.5 mt-2">
-            {email.llm_action === 'draft_saved' && (
+            {isAutoReplied && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"
-                style={{ background: 'rgba(210,140,160,0.1)', color: 'rgba(210,140,160,0.7)', border: '1px solid rgba(210,140,160,0.2)' }}>
-                reply drafted
+                style={{ background: 'rgba(80,200,120,0.1)', color: 'rgba(100,220,130,0.85)', border: '1px solid rgba(80,200,120,0.2)' }}>
+                auto-replied
               </span>
             )}
-            {email.llm_action === 'auto_replied' && (
+            {!isAutoReplied && (email.draft_body || email.llm_action === 'draft_saved') && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"
-                style={{ background: 'rgba(100,220,100,0.1)', color: 'rgba(100,220,100,0.7)', border: '1px solid rgba(100,220,100,0.2)' }}>
-                auto-replied
+                style={{ background: 'rgba(210,140,160,0.1)', color: 'rgba(210,140,160,0.7)', border: '1px solid rgba(210,140,160,0.2)' }}>
+                draft ready
+              </span>
+            )}
+            {email.llm_action === 'alert_sent' && !email.draft_body && !isAutoReplied && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full"
+                style={{ background: 'rgba(100,150,255,0.1)', color: 'rgba(100,150,255,0.7)', border: '1px solid rgba(100,150,255,0.2)' }}>
+                needs review
               </span>
             )}
             {email.category === 'critical' && (

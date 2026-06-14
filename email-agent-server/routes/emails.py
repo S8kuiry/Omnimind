@@ -1,486 +1,536 @@
-# GET  /emails                  (paginated, filterable)
-# GET  /emails/{id}             (single full email)
-# GET  /emails/stats            (counts by category/priority)
-# POST /emails/{id}/draft       (user asks LLM to draft reply)
-# POST /emails/{id}/send        (user approves + sends draft)
-# POST /emails/{id}/override    (user overrides LLM decision)
-# DELETE /emails/{id}           (manual delete)
+"""
+routes/emails.py — Attention Queue + Stats API
 
-from fastapi import APIRouter, HTTPException, Query, Body
+Changes from old version (per plan):
+  1. Removed is_db_connected() gate on GET /emails — serve from cache instead
+  2. GET /emails/stats reads from metrics_daily DB rollups — no Gmail fetch
+  3. Added POST /{id}/dismiss alias (logs user_reviewed + mark_seen)
+  4. POST /{id}/send logs user_replied + mark_seen + metrics_updated WS broadcast
+  5. DELETE /{id} logs user_reviewed + mark_seen + metrics_updated WS broadcast
+  6. POST /sync now returns deprecation notice — frontend must stop calling it
+  7. Removed import of services/metrics.py (file does not exist in final structure)
+  8. attention_cache used for analyze cache only — list comes from Gmail/localStorage
+"""
+
+import asyncio
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from datetime import datetime
-from bson import ObjectId
 
-from db.mongodb import get_collection, is_db_connected
-from models.user import find_user
-from lib.google_client import refresh_token_if_needed
-from lib.gmail_client import send_email, save_draft, trash_message
-from services.sync import sync_user_inbox
-from services.llm.responder import generate_draft_response
+from lib.google_client import get_gmail_credentials
+from lib.gmail_client import (
+    fetch_attention_labeled_emails,
+    fetch_message_detail,
+    send_gmail_reply,
+    modify_labels,
+)
+from config import settings
+from models.user import find_user_by_email
+from models.event import log_agent_event
+from models.seen import update_outcome, mark_seen, is_seen
+from models.metrics_daily import get_rollup, get_today
+from services.attention_cache import attention_cache
+from services.ws_manager import ws_manager
+from services.email_pipeline import process_incoming_email_pipeline, _build_card
+from services.auto_reply_policy import is_system_drop_meta
+from services.session_stats import session_stats
+from services.llm.summarizer import generate_full_summary, regenerate_draft_with_tone
+
+logger = logging.getLogger("routes.emails")
 
 router = APIRouter(prefix="/emails", tags=["emails"])
 
 
-# ── Request models ─────────────────────────────────────────────────
+# ── Request models ─────────────────────────────────────────────────────────
 
-class DraftRequest(BaseModel):
+class RegenerateDraftRequest(BaseModel):
     user_email: str
-    tone: str = "professional"        # professional | friendly | formal
-    context: str = ""                 # optional extra instruction from user
+    tone: str = "professional"
+    context: str = ""
 
 
-class SendRequest(BaseModel):
+class SendReplyRequest(BaseModel):
     user_email: str
     to: str
     subject: str
-    body: str                         # user-edited or LLM draft
+    body: str
+    provider: str = "gmail"
 
 
-class OverrideRequest(BaseModel):
-    user_email: str
-    new_action: str                   # auto_replied | draft_saved | archived | deleted
-    reason: str = ""
+# ── Shared helpers ─────────────────────────────────────────────────────────
 
-
-# ── Helpers ────────────────────────────────────────────────────────
-
-def _serialize(doc: dict) -> dict:
-    """Convert MongoDB ObjectId to string for JSON response."""
-    if doc and "_id" in doc:
-        doc["_id"] = str(doc["_id"])
-    return doc
-
-
-async def _get_user_tokens(user_email: str) -> dict:
-    user = await find_user(user_email)
+async def _require_user(user_email: str) -> dict:
+    if not user_email:
+        raise HTTPException(400, "user_email is required")
+    user = await find_user_by_email(user_email)
     if not user:
-        raise HTTPException(404, f"User {user_email} not found — connect Gmail first")
-    token_dict = {
-        "access_token": user["google_access_token"],
-        "refresh_token": user.get("google_refresh_token"),
-        "expiry": user.get("token_expiry"),
-    }
-    # Refresh if needed
-    refreshed = refresh_token_if_needed(token_dict)
-    return refreshed
+        raise HTTPException(404, f"No Gmail connection for {user_email}")
+    return user
 
 
-# ── GET /emails ────────────────────────────────────────────────────
+def _enrich_notifications(cards: list[dict]) -> list[dict]:
+    enriched = []
+    for card in cards:
+        msg_id = card.get("id") or card.get("provider_message_id")
+        analysis = attention_cache.get_analysis(msg_id) if msg_id else None
+        notification = card if card.get("_id") else _build_card(
+            card,
+            card.get("category", "work"),
+            card.get("priority", "medium"),
+        )
+        if analysis:
+            notification["summary"] = analysis.get("summary", notification.get("summary", ""))
+            notification["draft_body"] = analysis.get("draft_body", notification.get("draft_body", ""))
+        enriched.append(notification)
+    return enriched
+
+
+def _partition_system_drops(cards: list[dict]) -> tuple[list[dict], list[str]]:
+    """Split attention cards into keep vs silently-drop (mail delivery failures, etc.)."""
+    keep: list[dict] = []
+    drop_ids: list[str] = []
+    for card in cards:
+        if is_system_drop_meta(card):
+            msg_id = card.get("id") or card.get("provider_message_id") or card.get("_id")
+            if msg_id:
+                drop_ids.append(str(msg_id))
+            continue
+        keep.append(card)
+    return keep, drop_ids
+
+
+async def _silently_purge_system_drops(
+    user: dict,
+    user_email: str,
+    message_ids: list[str],
+) -> None:
+    """Remove mislabeled system mail from Attention → Processed in Gmail."""
+    if not message_ids:
+        return
+    try:
+        creds = await get_gmail_credentials(user_email)
+    except Exception as exc:
+        logger.warning(f"Could not purge system drops for {user_email}: {exc}")
+        return
+
+    processed_id = user.get("gmail_label_processed_id")
+    attention_id = user.get("gmail_label_attention_id")
+    purged = 0
+
+    for message_id in message_ids:
+        try:
+            remove_ids = ["UNREAD"]
+            if attention_id:
+                remove_ids.append(attention_id)
+            await asyncio.to_thread(
+                modify_labels,
+                creds=creds,
+                message_id=message_id,
+                add_label_ids=[processed_id] if processed_id else None,
+                remove_label_ids=remove_ids,
+            )
+            attention_cache.invalidate_email(user_email, message_id)
+            session_stats.record_dropped(user_email)
+            await log_agent_event(
+                user_email,
+                "spam_blocked",
+                message_id=message_id,
+                meta={"reason": "mail_delivery_subsystem"},
+            )
+            await ws_manager.broadcast_to_user(
+                user_email, {"event": "email_removed", "id": message_id}
+            )
+            purged += 1
+        except Exception as exc:
+            logger.warning(f"Failed to purge system drop {message_id} for {user_email}: {exc}")
+
+    if purged:
+        await _broadcast_metrics(user_email)
+        logger.info(f"Silently purged {purged} system-drop message(s) for {user_email}")
+
+
+def _filter_cards(cards: list[dict], category: str | None, priority: str | None) -> list[dict]:
+    result = cards
+    if category and category != "all":
+        result = [c for c in result if c.get("category") == category]
+    if priority and priority != "all":
+        result = [c for c in result if c.get("priority") == priority]
+    return result
+
+
+async def _load_attention_list(user: dict, user_email: str, *, force_refresh: bool = False) -> list[dict]:
+    """
+    Load the attention list.
+    Cache-first: serve from attention_cache if available.
+    Falls back to Gmail API fetch and repopulates cache.
+    System-delivery failures are never returned — purged from Gmail in background.
+    """
+    if not force_refresh:
+        cached = attention_cache.get_emails(user_email)
+        if cached is not None:
+            keep, drop_ids = _partition_system_drops(cached)
+            if drop_ids:
+                attention_cache.set_emails(user_email, keep)
+                asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
+            return keep
+
+    attention_id = user.get("gmail_label_attention_id")
+    if not attention_id:
+        return []
+
+    try:
+        creds = await get_gmail_credentials(user_email)
+        live = await asyncio.to_thread(
+            fetch_attention_labeled_emails,
+            creds=creds,
+            attention_label_id=attention_id,
+        )
+        keep, drop_ids = _partition_system_drops(live)
+        if drop_ids:
+            asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
+        notifications = _enrich_notifications(keep)
+        attention_cache.set_emails(user_email, notifications)
+        return notifications
+    except Exception:
+        # Serve stale cache rather than failing — no DB gate
+        fallback = attention_cache.get_emails_even_expired(user_email)
+        if fallback is not None:
+            keep, drop_ids = _partition_system_drops(fallback)
+            if drop_ids:
+                asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
+            return keep
+        raise
+
+
+async def _broadcast_metrics(user_email: str) -> None:
+    """
+    Broadcast current metrics to the frontend after any state change.
+    Frontend stat bar updates live — no polling needed.
+    """
+    try:
+        today = await get_today(user_email)
+        active_cards = len(attention_cache.get_emails(user_email) or [])
+        stats = session_stats.get_stats(user_email)
+
+        handled = today.get("auto_resolved", 0) + today.get("spam_blocked", 0)
+        total_seen = handled + today.get("attention_queued", 0)
+        rate = round((handled / total_seen) * 100, 1) if total_seen > 0 else 0.0
+
+        await ws_manager.broadcast_to_user(
+            user_email,
+            {
+                "event": "metrics_updated",
+                "data": {
+                    "auto_replies_total": today.get("auto_resolved", 0),
+                    "system_dropped_total": today.get("spam_blocked", 0),
+                    "manual_attention_historical_total": today.get("attention_queued", 0),
+                    "current_active_buffer_cards": active_cards,
+                    "automation_rate": rate,
+                },
+            },
+        )
+    except Exception as e:
+        logger.warning(f"metrics_updated broadcast failed for {user_email}: {e}")
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────
 
 @router.get("")
 async def list_emails(
     user_email: str = Query(...),
-    category: str = Query(None),       # work | newsletter | bill | personal | spam | critical
-    priority: str = Query(None),       # high | medium | low
-    is_read: bool = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=200),
+    category: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    refresh: bool = Query(False),
 ):
-    """Returns paginated emails for a user."""
-    if not is_db_connected():
-        raise HTTPException(503, "Database not connected")
+    """
+    Returns the attention queue.
+    FIX 1: No is_db_connected() gate — serve from cache if DB is down.
+    """
+    user = await _require_user(user_email)
+    if refresh:
+        attention_cache.invalidate_list(user_email)
+    try:
+        all_cards = await _load_attention_list(user, user_email, force_refresh=refresh)
+    except Exception as exc:
+        raise HTTPException(503, f"Gmail API unavailable: {exc}") from exc
 
-    col = get_collection("emails")
-
-    query: dict = {"user_email": user_email, "is_trashed": {"$ne": True}}
-    if category:
-        query["category"] = category
-    if priority:
-        query["priority"] = priority
-    if is_read is not None:
-        query["is_read"] = is_read
-
-    skip = (page - 1) * page_size
-    total = await col.count_documents(query)
-
-    cursor = col.find(query).sort("date", -1).skip(skip).limit(page_size)
-    emails = []
-    async for doc in cursor:
-        emails.append(_serialize(doc))
+    filtered = _filter_cards(all_cards, category, priority)
+    total = len(filtered)
+    start = (page - 1) * page_size
+    page_cards = filtered[start: start + page_size]
+    total_pages = max(1, (total + page_size - 1) // page_size)
 
     return {
-        "emails": emails,
+        "notifications": page_cards,
+        "total_active_cards": total,
         "total": total,
         "page": page,
         "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
+        "total_pages": total_pages,
     }
 
-
-# ── GET /emails/stats ──────────────────────────────────────────────
 
 @router.get("/stats")
-async def get_email_stats(user_email: str = Query(...)):
-    """Returns counts grouped by category and priority."""
-    if not is_db_connected():
-        raise HTTPException(503, "Database not connected")
+async def email_stats(
+    user_email: str = Query(...),
+    period: int = Query(7, ge=1, le=30),
+):
+    """
+    Returns aggregated metrics for the stat bar.
+    FIX 2: Reads from metrics_daily DB rollups only — no Gmail fetch.
+    FIX 7: No import of services/metrics.py.
+    """
+    await _require_user(user_email)
 
-    col = get_collection("emails")
-    base = {"user_email": user_email, "is_trashed": {"$ne": True}}
+    rollup = await get_rollup(user_email, n_days=period)
+    today = await get_today(user_email)
+    active_cards = len(attention_cache.get_emails(user_email) or [])
 
-    # Category breakdown
-    cat_pipeline = [
-        {"$match": base},
-        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
-    ]
-    cat_cursor = col.aggregate(cat_pipeline)
-    by_category = {}
-    async for doc in cat_cursor:
-        by_category[doc["_id"] or "uncategorized"] = doc["count"]
-
-    # Priority breakdown
-    pri_pipeline = [
-        {"$match": base},
-        {"$group": {"_id": "$priority", "count": {"$sum": 1}}},
-    ]
-    pri_cursor = col.aggregate(pri_pipeline)
-    by_priority = {}
-    async for doc in pri_cursor:
-        by_priority[doc["_id"] or "unknown"] = doc["count"]
-
-    # Unread count
-    unread = await col.count_documents({**base, "is_read": False})
-
-    # Critical unread — needs user attention
-    critical_unread = await col.count_documents({
-        **base,
-        "category": "critical",
-        "is_read": False,
-    })
-
-    # Today's processed count
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_count = await col.count_documents({
-        **base,
-        "processed_at": {"$gte": today_start},
-    })
+    handled = today.get("auto_resolved", 0) + today.get("spam_blocked", 0)
+    total_seen = handled + today.get("attention_queued", 0)
+    rate = round((handled / total_seen) * 100, 1) if total_seen > 0 else 0.0
 
     return {
-        "total": await col.count_documents(base),
-        "unread": unread,
-        "critical_unread": critical_unread,
-        "today_processed": today_count,
-        "by_category": by_category,
-        "by_priority": by_priority,
+        # Stat bar fields (frontend EmailStats.tsx)
+        "current_active_buffer_cards": active_cards,
+        "auto_replies_total": rollup.get("auto_resolved", 0),
+        "system_dropped_total": rollup.get("spam_blocked", 0),
+        "manual_attention_historical_total": rollup.get("attention_queued", 0),
+        "automation_rate": rollup.get("automation_rate", 0.0),
+
+        # Today breakdown
+        "auto_resolved_today": today.get("auto_resolved", 0),
+        "spam_blocked_today": today.get("spam_blocked", 0),
+        "attention_queued_today": today.get("attention_queued", 0),
+        "auto_send_count_today": today.get("auto_send_count", 0),
+        "auto_ack_count_today": today.get("auto_ack_count", 0),
+        "automation_rate_today": rate,
+
+        "period_days": period,
     }
 
-
-# ── POST /emails/sync ──────────────────────────────────────────────
 
 @router.post("/sync")
-async def sync_emails(user_email: str = Query(...)):
-    """Fetch unread Gmail messages, run LLM triage, populate inbox collection."""
-    if not is_db_connected():
-        raise HTTPException(503, "Database not connected")
-    return await sync_user_inbox(user_email)
-
-
-# ── GET /emails/{id} ──────────────────────────────────────────────
-
-@router.get("/{email_id}")
-async def get_email(email_id: str, user_email: str = Query(...)):
+async def sync_inbox_deprecated():
     """
-    Returns full email detail including summary, LLM reasoning, draft, gmail link.
+    FIX 6: Deprecated. Frontend must stop calling this.
+    Ingest runs automatically every 15 minutes via ingest_scheduler.
+    Use POST /cron/ingest?user_email=... for manual trigger (debug only).
     """
-    col = get_collection("emails")
+    return {
+        "status": "deprecated",
+        "message": (
+            "POST /emails/sync is deprecated. "
+            "Ingest runs automatically every 15 minutes. "
+            "Use POST /cron/ingest for manual debug trigger."
+        ),
+    }
 
+
+@router.get("/auto-replied")
+async def list_auto_replied_today(user_email: str = Query(...)):
+    """Today's auto-replied emails — audit log, resets at midnight UTC."""
+    from models.event import get_today_auto_replies
+
+    await _require_user(user_email)
+    today = await get_today(user_email)
+    items = await get_today_auto_replies(user_email)
+    return {
+        "items": items,
+        "count_today": today.get("auto_send_count", 0),
+    }
+
+
+@router.get("/{message_id}")
+async def get_email_detail(message_id: str, user_email: str = Query(...)):
+    """Return full parsed body for the detail panel."""
+    await _require_user(user_email)
+    creds = await get_gmail_credentials(user_email)
     try:
-        doc = await col.find_one({
-            "_id": ObjectId(email_id),
-            "user_email": user_email,
-        })
-    except Exception:
-        raise HTTPException(400, "Invalid email ID format")
+        detail = await asyncio.to_thread(fetch_message_detail, creds=creds, message_id=message_id)
+    except Exception as exc:
+        raise HTTPException(404, f"Could not load email {message_id}: {exc}") from exc
+    return detail
 
-    if not doc:
-        raise HTTPException(404, "Email not found")
 
-    # Mark as read when viewed in dashboard
-    if not doc.get("is_read"):
-        await col.update_one(
-            {"_id": ObjectId(email_id)},
-            {"$set": {"is_read": True}}
+@router.post("/{message_id}/analyze")
+async def analyze_email(message_id: str, user_email: str = Query(...)):
+    user = await _require_user(user_email)
+    cached = attention_cache.get_analysis(message_id)
+    if cached:
+        return cached
+
+    creds = await get_gmail_credentials(user_email)
+    analysis = await generate_full_summary(creds=creds, message_id=message_id)
+    attention_cache.set_analysis(message_id, analysis)
+    return analysis
+
+
+@router.post("/{message_id}/regenerate")
+async def regenerate_draft(message_id: str, payload: RegenerateDraftRequest):
+    await _require_user(payload.user_email)
+    creds = await get_gmail_credentials(payload.user_email)
+    result = await regenerate_draft_with_tone(
+        creds=creds,
+        message_id=message_id,
+        tone=payload.tone,
+        instructions=payload.context or None,
+    )
+    attention_cache.set_analysis(message_id, result)
+    return {
+        "new_draft_body": result.get("draft_body", ""),
+        "tone_applied": payload.tone,
+        "summary": result.get("summary", ""),
+    }
+
+
+@router.post("/{message_id}/send")
+async def send_reply(message_id: str, payload: SendReplyRequest):
+    """
+    FIX 4: Now logs user_replied event + mark_seen + metrics_updated WS.
+    """
+    user = await _require_user(payload.user_email)
+    creds = await get_gmail_credentials(payload.user_email)
+
+    await asyncio.to_thread(
+        send_gmail_reply, creds=creds, message_id=message_id, body=payload.body
+    )
+
+    processed_id = user.get("gmail_label_processed_id")
+    attention_id = user.get("gmail_label_attention_id")
+    remove_ids = [lid for lid in [attention_id, "UNREAD"] if lid]
+    await asyncio.to_thread(
+        modify_labels,
+        creds=creds,
+        message_id=message_id,
+        add_label_ids=[processed_id] if processed_id else None,
+        remove_label_ids=remove_ids or None,
+    )
+
+    attention_cache.invalidate_email(payload.user_email, message_id)
+
+    # Log event + update seen outcome
+    await log_agent_event(payload.user_email, "user_replied", message_id=message_id)
+    await update_outcome(payload.user_email, message_id, "user_replied")
+
+    # Broadcast to frontend
+    await ws_manager.broadcast_to_user(
+        payload.user_email, {"event": "email_removed", "id": message_id}
+    )
+    await _broadcast_metrics(payload.user_email)
+
+    return {"status": "sent"}
+
+
+@router.post("/{message_id}/dismiss")
+async def dismiss_email_post(message_id: str, user_email: str = Query(...)):
+    """
+    FIX 3: POST alias for dismiss (plan says add this).
+    Logs user_reviewed event. Frontend can call either DELETE or POST /dismiss.
+    """
+    return await _do_dismiss(message_id, user_email)
+
+
+@router.delete("/{message_id}")
+async def dismiss_email(message_id: str, user_email: str = Query(...)):
+    """
+    FIX 5: Now logs user_reviewed + mark_seen + metrics_updated WS.
+    """
+    return await _do_dismiss(message_id, user_email)
+
+
+async def _do_dismiss(message_id: str, user_email: str) -> dict:
+    """Shared logic for both dismiss routes."""
+    user = await _require_user(user_email)
+    creds = await get_gmail_credentials(user_email)
+
+    processed_id = user.get("gmail_label_processed_id")
+    attention_id = user.get("gmail_label_attention_id")
+
+    await asyncio.to_thread(
+        modify_labels,
+        creds=creds,
+        message_id=message_id,
+        add_label_ids=[processed_id] if processed_id else None,
+        remove_label_ids=[attention_id] if attention_id else None,
+    )
+
+    attention_cache.invalidate_email(user_email, message_id)
+
+    # Log event + update seen outcome
+    await log_agent_event(user_email, "user_reviewed", message_id=message_id)
+    await update_outcome(user_email, message_id, "user_reviewed")
+
+    # Broadcast to frontend
+    await ws_manager.broadcast_to_user(user_email, {"event": "email_removed", "id": message_id})
+    await _broadcast_metrics(user_email)
+
+    return {"status": "dismissed"}
+
+
+@router.post("/{message_id}/read")
+async def mark_email_as_read(message_id: str, user_email: str = Query(...)):
+    """
+    Marks an email as read/reviewed by the user without removing it
+    from the Gmail Attention label queue.
+    """
+    await _require_user(user_email)
+    creds = await get_gmail_credentials(user_email)
+
+    # Clear Gmail UNREAD only — keep the Attention label so the card stays in queue
+    try:
+        await asyncio.to_thread(
+            modify_labels,
+            creds=creds,
+            message_id=message_id,
+            remove_label_ids=["UNREAD"],
         )
-        doc["is_read"] = True
+    except Exception as exc:
+        logger.warning(f"Could not clear UNREAD for {message_id}: {exc}")
 
-    return _serialize(doc)
+    await log_agent_event(user_email, "user_viewed", message_id=message_id)
+    if await is_seen(user_email, message_id):
+        await update_outcome(user_email, message_id, "user_viewed")
+    else:
+        await mark_seen(user_email, message_id, "user_viewed")
+
+    await ws_manager.broadcast_to_user(
+        user_email,
+        {
+            "event": "email_read",
+            "id": message_id,
+        },
+    )
+
+    await _broadcast_metrics(user_email)
+
+    return {"status": "marked_read"}
 
 
-# ── POST /emails/{id}/draft ────────────────────────────────────────
-
-@router.post("/{email_id}/draft")
-async def generate_draft(email_id: str, req: DraftRequest):
-    """Generate a reply draft with Gemini and save to Gmail + MongoDB."""
-    col = get_collection("emails")
-
+# @router.websocket("/stream")
+# async def websocket_email_stream(websocket: WebSocket, user_email: str):
+#     await ws_manager.connect(user_email, websocket)
+#     try:
+#         while True:
+#             await websocket.receive_text()
+#     except WebSocketDisconnect:
+#         ws_manager.disconnect(user_email, websocket)
+@router.websocket("/stream")
+async def websocket_email_stream(websocket: WebSocket, user_email: str):
+    await ws_manager.connect(user_email, websocket)
     try:
-        doc = await col.find_one({
-            "_id": ObjectId(email_id),
-            "user_email": req.user_email,
-        })
-    except Exception:
-        raise HTTPException(400, "Invalid email ID format")
-
-    if not doc:
-        raise HTTPException(404, "Email not found")
-
-    draft_result = await generate_draft_response(
-        doc.get("from_address", ""),
-        doc.get("subject", ""),
-        doc.get("body_text", doc.get("snippet", "")),
-        doc.get("summary", ""),
-    )
-    draft_text = draft_result.get("draft_body", "").strip()
-    if req.context:
-        draft_text = f"{draft_text}\n\n{req.context}".strip()
-
-    # Save as Gmail draft
-    token_dict = await _get_user_tokens(req.user_email)
-    gmail_draft = save_draft(
-        token_dict=token_dict,
-        to=doc["from_address"],
-        subject=f"Re: {doc['subject']}",
-        body=draft_text,
-    )
-
-    # Update email record
-    await col.update_one(
-        {"_id": ObjectId(email_id)},
-        {"$set": {
-            "draft_id": gmail_draft["draft_id"],
-            "draft_body": draft_text,
-            "llm_action": "draft_saved",
-            "updated_at": datetime.utcnow(),
-        }}
-    )
-
-    # Log action
-    await _log_action(
-        user_email=req.user_email,
-        email_id=email_id,
-        actor="llm",
-        action="draft_saved",
-        detail=f"Draft generated with tone={req.tone}",
-    )
-
-    return {
-        "draft_id": gmail_draft["draft_id"],
-        "draft_body": draft_text,
-        "to": doc["from_address"],
-        "subject": f"Re: {doc['subject']}",
-    }
-
-
-# ── POST /emails/{id}/send ─────────────────────────────────────────
-
-@router.post("/{email_id}/send")
-async def send_reply(email_id: str, req: SendRequest):
-    """
-    User approves and sends a reply (LLM draft or their own text).
-    """
-    col = get_collection("emails")
-
-    try:
-        doc = await col.find_one({
-            "_id": ObjectId(email_id),
-            "user_email": req.user_email,
-        })
-    except Exception:
-        raise HTTPException(400, "Invalid email ID")
-
-    if not doc:
-        raise HTTPException(404, "Email not found")
-
-    # Send via Gmail API
-    token_dict = await _get_user_tokens(req.user_email)
-    result = send_email(
-        token_dict=token_dict,
-        to=req.to,
-        subject=req.subject,
-        body=req.body,
-    )
-
-    # Update record
-    await col.update_one(
-        {"_id": ObjectId(email_id)},
-        {"$set": {
-            "auto_reply_sent": True,
-            "llm_action": "auto_replied",
-            "sent_message_id": result["message_id"],
-            "updated_at": datetime.utcnow(),
-        }}
-    )
-
-    await _log_action(
-        user_email=req.user_email,
-        email_id=email_id,
-        actor="user",
-        action="sent_reply",
-        detail=f"Reply sent to {req.to}",
-    )
-
-    return {"message": "Reply sent", "gmail_message_id": result["message_id"]}
-
-
-# ── POST /emails/{id}/override ─────────────────────────────────────
-
-@router.post("/{email_id}/override")
-async def override_decision(email_id: str, req: OverrideRequest):
-    """
-    User disagrees with LLM decision and overrides it.
-    Records both the old and new decision for audit.
-    """
-    col = get_collection("emails")
-
-    try:
-        doc = await col.find_one({
-            "_id": ObjectId(email_id),
-            "user_email": req.user_email,
-        })
-    except Exception:
-        raise HTTPException(400, "Invalid email ID")
-
-    if not doc:
-        raise HTTPException(404, "Email not found")
-
-    old_action = doc.get("llm_action", "unknown")
-
-    await col.update_one(
-        {"_id": ObjectId(email_id)},
-        {"$set": {
-            "user_overrode": True,
-            "user_action": req.new_action,
-            "override_reason": req.reason,
-            "updated_at": datetime.utcnow(),
-        }}
-    )
-
-    await _log_action(
-        user_email=req.user_email,
-        email_id=email_id,
-        actor="user",
-        action="override",
-        detail=f"LLM said '{old_action}', user chose '{req.new_action}'. Reason: {req.reason}",
-    )
-
-    return {
-        "message": "Decision overridden",
-        "old_action": old_action,
-        "new_action": req.new_action,
-    }
-
-
-# ── DELETE /emails/{id} ────────────────────────────────────────────
-
-@router.delete("/{email_id}")
-async def delete_email(email_id: str, user_email: str = Query(...)):
-    """
-    Manually delete an email — trashes on Gmail and marks in MongoDB.
-    """
-    col = get_collection("emails")
-
-    try:
-        doc = await col.find_one({
-            "_id": ObjectId(email_id),
-            "user_email": user_email,
-        })
-    except Exception:
-        raise HTTPException(400, "Invalid email ID")
-
-    if not doc:
-        raise HTTPException(404, "Email not found")
-
-    # Trash on Gmail
-    try:
-        token_dict = await _get_user_tokens(user_email)
-        trash_message(token_dict, doc["gmail_message_id"])
+        while True:
+            # Maintain the connection alive & listen for client pings
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info(u"WebSocket disconnected cleanly for %s", user_email)
     except Exception as e:
-        print(f"[Gmail trash] Warning: {e}")
-
-    # Soft delete in MongoDB
-    await col.update_one(
-        {"_id": ObjectId(email_id)},
-        {"$set": {
-            "is_trashed": True,
-            "trashed_at": datetime.utcnow(),
-        }}
-    )
-
-    await _log_action(
-        user_email=user_email,
-        email_id=email_id,
-        actor="user",
-        action="deleted",
-        detail="Manually deleted from dashboard",
-    )
-
-    return {"message": f"Email {email_id} deleted"}
-
-
-# ── PATCH /emails/{id}/read ────────────────────────────────────────────
-
-class MarkReadRequest(BaseModel):
-    user_email: str
-
-
-@router.patch("/{email_id}/read")
-async def mark_as_read(email_id: str, req: MarkReadRequest):
-    if not is_db_connected():
-        raise HTTPException(503, "Database not connected")
-
-    col = get_collection("emails")
-
-    try:
-        oid = ObjectId(email_id)
-    except Exception:
-        raise HTTPException(400, "Invalid email ID format")
-
-    result = await col.update_one(
-        {"_id": oid, "user_email": req.user_email, "is_trashed": {"$ne": True}},
-        {"$set": {"is_read": True}},
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(404, "Email not found")
-
-    return {"status": "success", "message": "Email marked as read"}
-
-
-# ── Internal helpers ───────────────────────────────────────────────
-
-def _build_draft_prompt(email_doc: dict, tone: str, context: str) -> str:
-    return f"""You are drafting a reply to the following email.
-
-FROM: {email_doc.get('from_name', '')} <{email_doc.get('from_address', '')}>
-SUBJECT: {email_doc.get('subject', '')}
-EMAIL BODY:
-{email_doc.get('body_text', email_doc.get('snippet', ''))}
-
-SUMMARY: {email_doc.get('summary', '')}
-
-Instructions:
-- Tone: {tone}
-- Keep the reply concise and relevant
-- Do not include a subject line — just the body text
-- Do not include placeholder text like [Your Name]
-{f'- Additional context: {context}' if context else ''}
-
-Write only the reply body:"""
-
-
-async def _log_action(
-    user_email: str,
-    email_id: str,
-    actor: str,
-    action: str,
-    detail: str,
-):
-    col = get_collection("action_logs")
-    await col.insert_one({
-        "user_email": user_email,
-        "email_id": email_id,
-        "actor": actor,
-        "action": action,
-        "detail": detail,
-        "timestamp": datetime.utcnow(),
-    })
+        logger.error(u"Unexpected WebSocket error for %s: %s", user_email, e)
+    finally:
+        # ── GUARANTEED CLEANUP ────────────────────────────────────────
+        # This block ALWAYS runs, protecting your server from memory leaks
+        ws_manager.disconnect(user_email, websocket)

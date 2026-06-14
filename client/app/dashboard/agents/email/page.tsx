@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  Mail, ShieldCheck, RefreshCw, XCircle, RotateCcw,
+  Mail, ShieldCheck, RefreshCw, XCircle,
   Inbox, CheckCircle2, AlertCircle, ArrowRight, Wifi, WifiOff,
   FileEdit, ShieldAlert, BarChart3,
 } from "lucide-react";
@@ -13,9 +13,11 @@ import {
   getAuthStatus,
   revokeGmailAuth,
   fetchEmailStats,
-  syncEmailAgent,
+  fetchAgentOverview,   // CHANGE: replaces old syncEmailAgent POST
   getEmailAgentBaseUrl,
+  type EmailStats,
 } from "@/lib/automationApi";
+import { loadMetrics, saveMetrics } from "@/lib/metricsStorage";
 import EmailDashboard from "@/app/components/email-agents/EmailDashboard";
 
 type StatCard = {
@@ -27,7 +29,6 @@ type StatCard = {
 
 interface StatsState {
   total: string;
-  unread: string;
   resolved: string;
   draftsCreated: string;
   spamBlocked: string;
@@ -41,16 +42,13 @@ function EmailAgentContent() {
   const [isConnected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revoking, setRevoking] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
 
-  const [stats, setStats] = useState<StatsState>({
-    total: "—",
-    unread: "—",
-    resolved: "—",
-    draftsCreated: "0",
-    spamBlocked: "0",
-    automationRate: "0",
+  // CHANGE: seed from localStorage immediately — no flicker on return visit
+  const [stats, setStats] = useState<StatsState>(() => {
+    if (typeof window === 'undefined') return emptyStats()
+    // We'll hydrate from localStorage after we know the email
+    return emptyStats()
   });
 
   useEffect(() => {
@@ -63,16 +61,25 @@ function EmailAgentContent() {
       setConnected(true);
       setLoading(false);
       window.history.replaceState({}, "", "/dashboard/agents/email");
+      // Load stats once after OAuth connect
+      void loadStats(urlEmail);
       return;
     }
 
     void checkAuth(session?.user?.email ?? undefined);
   }, [searchParams, sessionStatus, session?.user?.email]);
 
+  // CHANGE: Load stats once on connect — no interval polling
+  // Stat bar updates live via WS metrics_updated events from EmailDashboard
   useEffect(() => {
-    if (isConnected && email) {
-      loadStats(email);
-    }
+    if (!isConnected || !email) return;
+
+    // Seed from localStorage first for instant render
+    const cached = loadMetrics(email);
+    if (cached) applyStats(cached);
+
+    // Then fetch fresh from server once
+    void loadStats(email);
   }, [isConnected, email]);
 
   const checkAuth = async (accountEmail?: string) => {
@@ -87,32 +94,39 @@ function EmailAgentContent() {
     setLoading(false);
   };
 
+  const applyStats = useCallback((bufferStats: EmailStats) => {
+    const processed =
+      bufferStats.autoRepliesTotal +
+      bufferStats.systemDroppedTotal +
+      bufferStats.manualAttentionTotal;
+    const automationRate =
+      bufferStats.automationRate ??
+      (processed > 0
+        ? Math.round(((bufferStats.autoRepliesTotal + bufferStats.systemDroppedTotal) / processed) * 1000) / 10
+        : 0);
+
+    setStats({
+      total: String(bufferStats.activeCards),
+      resolved: String(bufferStats.autoRepliesTotal),
+      draftsCreated: String(bufferStats.manualAttentionTotal),
+      spamBlocked: String(bufferStats.systemDroppedTotal),
+      automationRate: String(automationRate),
+    });
+  }, []);
+
   const loadStats = async (userEmail: string) => {
     setStatsLoading(true);
     try {
-      const [syncData, dbStats] = await Promise.all([
-        syncEmailAgent(userEmail),
+      // CHANGE: GET /emails/stats only — no POST /agents/email/sync
+      const [statsData, overview] = await Promise.all([
         fetchEmailStats(userEmail),
+        fetchAgentOverview(userEmail),
       ]);
 
-      if (syncData) {
-        setStats({
-          total: String(syncData.monitored_threads ?? dbStats?.total ?? "—"),
-          unread: String(syncData.unread_pending ?? dbStats?.unread ?? "—"),
-          resolved: String(syncData.auto_resolved ?? dbStats?.today_processed ?? "—"),
-          draftsCreated: String(syncData.drafts_created ?? 0),
-          spamBlocked: String(syncData.spam_blocked ?? 0),
-          automationRate: String(syncData.automation_rate ?? 0),
-        });
-      } else if (dbStats) {
-        setStats({
-          total: String(dbStats.total),
-          unread: String(dbStats.unread),
-          resolved: String(dbStats.today_processed),
-          draftsCreated: "0",
-          spamBlocked: String(dbStats.by_category?.spam ?? 0),
-          automationRate: "0",
-        });
+      const merged = statsData ?? overview;
+      if (merged) {
+        applyStats(merged);
+        saveMetrics(userEmail, merged);
       }
     } finally {
       setStatsLoading(false);
@@ -131,18 +145,15 @@ function EmailAgentContent() {
       await revokeGmailAuth(acc);
       setConnected(false);
       setEmail(null);
-      setStats({ total: "—", unread: "—", resolved: "—", draftsCreated: "0", spamBlocked: "0", automationRate: "0" });
+      setStats(emptyStats());
     } finally {
       setRevoking(false);
     }
   };
 
-  const handleSync = async () => {
-    if (!email) return;
-    setSyncing(true);
-    await loadStats(email);
-    setSyncing(false);
-  };
+  const handleStatsUpdated = useCallback((bufferStats: EmailStats) => {
+    applyStats(bufferStats);
+  }, [applyStats]);
 
   if (loading) {
     return (
@@ -163,26 +174,27 @@ function EmailAgentContent() {
   };
 
   const STAT_CARDS: StatCard[] = [
-    { icon: Inbox, label: "monitored threads", value: stats.total, sub: "Gmail mailbox scope" },
-    { icon: AlertCircle, label: "unread pending", value: stats.unread, sub: "awaiting triage" },
-    { icon: FileEdit, label: "staged drafts", value: stats.draftsCreated, sub: "AI-generated replies" },
-    { icon: CheckCircle2, label: "auto-resolved", value: stats.resolved, sub: "processed this week" },
-    { icon: ShieldAlert, label: "spam blocked", value: stats.spamBlocked, sub: "filtered by agent" },
-    { icon: BarChart3, label: "automation rate", value: `${stats.automationRate}%`, sub: "hands-off yield" },
+    { icon: Inbox,       label: "active queue",    value: stats.total,          sub: "emails needing review" },
+    { icon: FileEdit,    label: "staged drafts",   value: stats.draftsCreated,  sub: "routed to attention queue" },
+    { icon: CheckCircle2,label: "auto-resolved",   value: stats.resolved,       sub: "handled without you" },
+    { icon: ShieldAlert, label: "spam blocked",    value: stats.spamBlocked,    sub: "filtered by agent" },
+    { icon: BarChart3,   label: "automation rate", value: `${stats.automationRate}%`, sub: "hands-off yield" },
   ];
 
   return (
-    <div className="flex-1 min-h-screen overflow-y-auto px-7 py-9 font-mono"
+    <div className="flex-1 min-h-screen h-auto overflow-y-auto px-7  pt-7 pb-7 font-mono mb-100"
       style={{ background: "#010003", color: "rgba(255,255,255,0.82)" }}>
-      <div className="max-w-7xl mx-auto space-y-5">
+      <div className="max-w-7xl mx-auto space-y-5 h-screen">
 
-        <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em]" style={{ color: "rgba(255,255,255,0.22)" }}>
+        <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em]"
+          style={{ color: "rgba(255,255,255,0.22)" }}>
           <span>omnimind</span><ArrowRight size={8} /><span>agents</span>
           <ArrowRight size={8} /><span style={{ color: "rgba(210,140,160,0.7)" }}>email</span>
         </div>
 
         {/* Header */}
-        <div className="rounded-2xl p-5" style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255, 255, 255, 0.21)" }}>
+        <div className="rounded-2xl p-5"
+          style={{ background: "rgba(255,255,255,0.015)", border: "1px solid rgba(255, 255, 255, 0.21)" }}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3.5">
               <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -193,9 +205,11 @@ function EmailAgentContent() {
                 <Mail size={15} style={{ color: isConnected ? "rgba(100,220,100,0.8)" : "rgba(210,140,160,0.7)" }} />
               </div>
               <div>
-                <h1 className="text-sm font-medium tracking-tight" style={{ color: "rgba(255,255,255,0.88)" }}>Email Agent</h1>
+                <h1 className="text-sm font-medium tracking-tight" style={{ color: "rgba(255,255,255,0.88)" }}>
+                  Email Agent
+                </h1>
                 <p className="text-[10px] mt-0.5" style={{ color: "rgba(255,255,255,0.28)" }}>
-                  Gmail · Gemini triage · {getEmailAgentBaseUrl().replace(/^https?:\/\//, '')}
+                  Gmail · Groq triage · {getEmailAgentBaseUrl().replace(/^https?:\/\//, '')}
                 </p>
                 <div className="flex items-center gap-2 mt-2">
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] uppercase tracking-wider"
@@ -211,35 +225,26 @@ function EmailAgentContent() {
             </div>
 
             <div className="flex items-center gap-2">
-              {isConnected && (
-                <button onClick={handleSync} disabled={syncing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-wide border cursor-pointer"
-                  style={{ background: "rgba(255,255,255,0.025)", borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)" }}>
-                  <RotateCcw size={10} className={syncing ? "animate-spin" : ""} />
-                  {syncing ? "syncing..." : "sync now"}
-                </button>
-              )}
               {!isConnected ? (
                 <button onClick={handleConnect}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] tracking-wide border cursor-pointer transition-all"
-                style={{ background: "rgba(210,140,160,0.08)", borderColor: "rgba(210,140,160,0.25)", color: "rgba(210,140,160,0.9)" }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = "rgba(210,140,160,0.15)"
-                  e.currentTarget.style.borderColor = "rgba(210,140,160,0.4)"
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = "rgba(210,140,160,0.08)"
-                  e.currentTarget.style.borderColor = "rgba(210,140,160,0.25)"
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                </svg>
-                Connect Gmail
-              </button>
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] tracking-wide border cursor-pointer transition-all"
+                  style={{ background: "rgba(210,140,160,0.08)", borderColor: "rgba(210,140,160,0.25)", color: "rgba(210,140,160,0.9)" }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = "rgba(210,140,160,0.15)"
+                    e.currentTarget.style.borderColor = "rgba(210,140,160,0.4)"
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = "rgba(210,140,160,0.08)"
+                    e.currentTarget.style.borderColor = "rgba(210,140,160,0.25)"
+                  }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  Connect Gmail
+                </button>
               ) : (
                 <button onClick={handleRevoke} disabled={revoking}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-wide border cursor-pointer"
@@ -257,18 +262,20 @@ function EmailAgentContent() {
             style={{ background: "rgba(210,140,160,0.03)", border: "1px dashed rgba(210,140,160,0.15)" }}>
             <ShieldCheck size={14} className="flex-shrink-0 mt-0.5" style={{ color: "rgba(210,140,160,0.5)" }} />
             <div>
-              <p className="text-[11px] font-medium mb-0.5" style={{ color: "rgba(255,255,255,0.55)" }}>Gmail access required</p>
+              <p className="text-[11px] font-medium mb-0.5" style={{ color: "rgba(255,255,255,0.55)" }}>
+                Gmail access required
+              </p>
               <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.28)" }}>
-                Connect Gmail to fetch, categorize, and manage your inbox via the email-agent-server.
+                Connect Gmail to start auto-triaging your inbox. The agent runs continuously — only emails needing your attention surface here.
               </p>
             </div>
           </div>
         )}
 
-        {/* Metrics */}
+        {/* Stat cards */}
         {isConnected && (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
-            {statsLoading && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+            {statsLoading && !stats.resolved && (
               <div className="col-span-full flex items-center justify-center gap-2 py-3 rounded-xl"
                 style={{ background: 'rgba(210,140,160,0.04)', border: '1px solid rgba(210,140,160,0.12)' }}>
                 <RefreshCw size={12} className="animate-spin" style={{ color: 'rgba(210,140,160,0.7)' }} />
@@ -284,7 +291,7 @@ function EmailAgentContent() {
                   <span className="text-[9px] uppercase tracking-[0.15em]">{label}</span>
                 </div>
                 <div className="text-2xl font-light mb-0.5 tabular-nums" style={{ color: "rgba(255,255,255,0.88)" }}>
-                  {statsLoading ? "…" : value}
+                  {value}
                 </div>
                 <div className="text-[10px]" style={{ color: "rgba(255,255,255,0.28)" }}>{sub}</div>
               </div>
@@ -292,11 +299,21 @@ function EmailAgentContent() {
           </div>
         )}
 
-        {/* Inbox */}
-        {isConnected && email && <EmailDashboard userEmail={email} />}
+        {/* Dashboard */}
+        {isConnected && email && (
+          <EmailDashboard
+            userEmail={email}
+            onStatsUpdated={handleStatsUpdated}
+          />
+        )}
+        <div className="h-5"></div>
       </div>
     </div>
   );
+}
+
+function emptyStats(): StatsState {
+  return { total: "—", resolved: "—", draftsCreated: "0", spamBlocked: "0", automationRate: "0" };
 }
 
 export default function EmailAgentDashboard() {

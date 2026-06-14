@@ -4,14 +4,24 @@ import type { EmailStats } from '@/lib/automationApi'
 export default function EmailStatsBar({ stats }: { stats: EmailStats }) {
   const items = [
     {
-      label: 'Total',
-      value: stats.total,
-      color: 'rgba(255,255,255,0.65)',
+      label: 'Pending',
+      value: stats.activeCards,
+      color: 'rgba(255,190,60,0.85)',
     },
     {
-      label: 'Unread',
-      value: stats.unread,
-      color: 'rgba(255,190,60,0.85)',
+      label: 'Auto-replied',
+      value: stats.autoSendCountToday ?? stats.autoRepliesTotal ?? 0,
+      color: 'rgba(100,220,100,0.85)',
+    },
+    {
+      label: 'Manual',
+      value: stats.manualAttentionTotal,
+      color: 'rgba(210,140,160,0.85)',
+    },
+    {
+      label: 'Dropped',
+      value: stats.systemDroppedTotal,
+      color: 'rgba(160,160,160,0.7)',
     },
     {
       label: 'Critical',
@@ -22,16 +32,6 @@ export default function EmailStatsBar({ stats }: { stats: EmailStats }) {
       label: 'Today',
       value: stats.today_processed,
       color: 'rgba(100,200,150,0.8)',
-    },
-    {
-      label: 'High',
-      value: stats.by_priority?.high ?? 0,
-      color: 'rgba(255,140,80,0.85)',
-    },
-    {
-      label: 'Work',
-      value: stats.by_category?.work ?? 0,
-      color: 'rgba(100,150,255,0.75)',
     },
   ]
 

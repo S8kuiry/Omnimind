@@ -1,86 +1,66 @@
-import time
-import json
-from typing import Optional
+import asyncio
+import logging
+
 from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
-from config import settings
 
-# 1. Expanded structural contract to handle triage and auto-replies
-class EmailAnalysisOutput(BaseModel):
-    summary: str = Field(
-        description="A concise, high-impact overview of the email context, restricted to exactly 1 or 2 sentences."
-    )
-    action_items: list[str] = Field(
-        description="An array of concrete actions, deadlines, or explicit requests mentioned. Leave empty if none."
-    )
-    category: str = Field(
-        description="Classify into exactly one: work | personal | newsletter | bill | spam | critical"
-    )
-    priority: str = Field(
-        description="Classify urgency based on context: high | medium | low"
-    )
-    requires_auto_reply: bool = Field(
-        description="Set to True ONLY if this is a basic operational work inquiry from a real human that can be fully addressed with a neutral, standard confirmation or basic info reply."
-    )
-    auto_reply_body: Optional[str] = Field(
-        default=None,
-        description="If requires_auto_reply is True, write a concise, helpful response in a completely neutral, professional corporate tone. Do not include placeholders like [Your Name]. If False, leave this null."
-    )
+from lib.gmail_client import fetch_message_detail
+from services.llm.client import generate_structured_json
+
+logger = logging.getLogger("summarizer")
 
 
-async def analyze_and_triage_email(subject: str, body: str) -> dict:
-    start_time = time.time()
-    
-    api_key = settings.gemini_api_key or None
-    client = genai.Client(api_key=api_key)
-    
-    system_instruction = (
-        "You are an advanced operational email triage agent. Your objective is to strip "
-        "noise from incoming messages, extract structured data, classify incoming intent, "
-        "and draft safe, professional, ultra-neutral automatic responses for basic work inquiries."
+class AnalysisArtifact(BaseModel):
+    summary: str = Field(description="Concise bulleted summary.")
+    suggested_draft: str = Field(description="Professional suggested reply draft.")
+
+
+async def _analyze_content_core(email_data: dict, tone_instruction: str) -> dict:
+    subject = email_data.get("subject", "(No Subject)")
+    body_text = email_data.get("body_text", "") or email_data.get("snippet", "")
+    sender = email_data.get("from_name") or email_data.get("from_address", "Sender")
+
+    user_content = (
+        f"From: {sender}\nSubject: {subject}\n\nContent:\n\"\"\"\n{body_text}\n\"\"\"\n\n"
+        f"Tone for draft: {tone_instruction}"
     )
-    
-    user_content = f"""
-    Analyze the following email details:
-    SUBJECT: {subject}
-    BODY:
-    \"\"\"{body}\"\"\"
-    """
-    
+    system = (
+        "Analyze the email. Return a bulleted summary and a production-ready reply draft. "
+        "No placeholders."
+    )
+
     try:
-        response = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=user_content,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=EmailAnalysisOutput,
-                temperature=0.1, # Dropped to 0.1 to maximize deterministic classification
-            )
-        )
-        
-        result = json.loads(response.text)
-        result["latency_ms"] = int((time.time() - start_time) * 1000)
-        return result
-        
-    except Exception as e:
-        print(f"[LLM Core Error] Analysis failure: {e}")
+        result = await generate_structured_json(system, user_content, AnalysisArtifact, temperature=0.2)
         return {
-            "summary": f"Failed to auto-summarize email regarding: '{subject}'.",
-            "action_items": [],
-            "category": "work",
-            "priority": "medium",
-            "requires_auto_reply": False,
-            "auto_reply_body": None,
-            "latency_ms": int((time.time() - start_time) * 1000)
+            "summary": result.get("summary", ""),
+            "draft_body": result.get("suggested_draft", ""),
+            "suggested_draft": result.get("suggested_draft", ""),
+        }
+    except Exception as exc:
+        logger.error(f"Deep analysis failed: {exc}")
+        fallback = (
+            f"Hello,\n\nThank you for your message regarding '{subject}'. "
+            "I will follow up shortly.\n\nBest regards."
+        )
+        return {
+            "summary": f"• Message from {sender} about: {subject}",
+            "draft_body": fallback,
+            "suggested_draft": fallback,
         }
 
 
-async def summarize_email(subject: str, body: str) -> dict:
-    """Backward-compatible alias used by services/consumer.py."""
-    result = await analyze_and_triage_email(subject, body)
-    return {
-        "summary": result.get("summary", ""),
-        "latency_ms": result.get("latency_ms", 0),
-    }
+async def generate_full_summary(creds, message_id: str) -> dict:
+    email_detail = await asyncio.to_thread(fetch_message_detail, creds=creds, message_id=message_id)
+    return await _analyze_content_core(email_detail, "professional, clear, and helpful")
+
+
+async def regenerate_draft_with_tone(
+    creds,
+    message_id: str,
+    tone: str,
+    instructions: str | None = None,
+) -> dict:
+    email_detail = await asyncio.to_thread(fetch_message_detail, creds=creds, message_id=message_id)
+    tone_instruction = tone
+    if instructions:
+        tone_instruction = f"{tone}. Additional instructions: {instructions}"
+    return await _analyze_content_core(email_detail, tone_instruction)

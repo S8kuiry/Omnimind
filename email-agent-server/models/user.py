@@ -1,83 +1,117 @@
-# OAuth tokens, preferences, linked by email
-from db.mongodb import get_collection, is_db_connected
+import logging
 import time
+from typing import List, Optional
 
-# TEMP: in-memory only while connect_db() is commented in main.py
+from db.mongodb import get_db, get_collection, is_db_connected
+
+logger = logging.getLogger("models_user")
+
+COLLECTION = "email_agent_users"
 _memory_users: dict[str, dict] = {}
 
 
 def get_user_collection():
-    """Helper to fetch the MongoDB collection."""
-    return get_collection("email_agent_users")
+    return get_collection(COLLECTION)
 
 
-async def find_user(email: str) -> dict | None:
-    """Find a user by their email address."""
+async def find_user_by_email(email: str) -> Optional[dict]:
     if not is_db_connected():
         return _memory_users.get(email)
+    return await get_user_collection().find_one({"email": email})
 
-    collection = get_user_collection()
-    user = await collection.find_one({"email": email})
-    return user
+
+async def find_user(email: str) -> Optional[dict]:
+    return await find_user_by_email(email)
+
+
+async def list_users_with_gmail_tokens() -> List[dict]:
+    if not is_db_connected():
+        return [u for u in _memory_users.values() if _has_tokens(u)]
+    cursor = get_user_collection().find({
+        "$or": [
+            {"oauth_token.refresh_token": {"$exists": True}},
+            {"google_refresh_token": {"$exists": True}},
+        ]
+    })
+    return await cursor.to_list(length=1000)
+
+
+def _has_tokens(user: dict) -> bool:
+    oauth = user.get("oauth_token", {})
+    return bool(oauth.get("refresh_token") or user.get("google_refresh_token"))
 
 
 async def upsert_user(email: str, token_dict: dict, profile: dict) -> dict:
-    """
-    Insert a new user or update an existing user's OAuth tokens.
-    Calculates absolute token expiry times dynamically.
-    """
     expires_in = token_dict.get("expires_in", 3600)
-    token_expiry = int(time.time()) + expires_in
+    expires_at = time.time() + expires_in
 
-    update_doc = {
+    doc = {
         "email": email,
         "name": profile.get("name"),
         "picture": profile.get("picture"),
+        "oauth_token": {
+            "access_token": token_dict.get("access_token"),
+            "refresh_token": token_dict.get("refresh_token"),
+            "expires_at": expires_at,
+        },
         "google_access_token": token_dict.get("access_token"),
-        "token_expiry": token_expiry,
-        "last_sync": int(time.time())
+        "google_refresh_token": token_dict.get("refresh_token"),
+        "token_expiry": expires_at,
+        "last_sync": int(time.time()),
     }
 
-    if token_dict.get("refresh_token"):
-        update_doc["google_refresh_token"] = token_dict.get("refresh_token")
-    elif not is_db_connected() and email in _memory_users:
-        existing_refresh = _memory_users[email].get("google_refresh_token")
-        if existing_refresh:
-            update_doc["google_refresh_token"] = existing_refresh
-
     if not is_db_connected():
-        _memory_users[email] = {**_memory_users.get(email, {}), **update_doc}
-        return update_doc
+        _memory_users[email] = {**_memory_users.get(email, {}), **doc}
+        return doc
 
-    collection = get_user_collection()
-    await collection.update_one(
-        {"email": email},
-        {"$set": update_doc},
-        upsert=True
-    )
-
-    return update_doc
+    await get_user_collection().update_one({"email": email}, {"$set": doc}, upsert=True)
+    return await find_user_by_email(email) or doc
 
 
 async def clear_user_tokens(email: str) -> None:
-    """Remove OAuth tokens for a user (used on revoke)."""
+    unset = {
+        "oauth_token": "",
+        "google_access_token": "",
+        "google_refresh_token": "",
+        "token_expiry": "",
+        "gmail_label_attention_id": "",
+        "gmail_label_processed_id": "",
+        "gmail_history_id": "",
+    }
     if not is_db_connected():
         user = _memory_users.get(email)
-        if not user:
-            return
-        user.pop("google_access_token", None)
-        user.pop("google_refresh_token", None)
-        user.pop("token_expiry", None)
+        if user:
+            for key in list(unset):
+                user.pop(key, None)
         return
+    await get_user_collection().update_one({"email": email}, {"$unset": unset})
 
-    collection = get_user_collection()
-    await collection.update_one(
+
+async def save_gmail_label_ids(email: str, attention_id: str, processed_id: str) -> bool:
+    if not is_db_connected():
+        if email in _memory_users:
+            _memory_users[email]["gmail_label_attention_id"] = attention_id
+            _memory_users[email]["gmail_label_processed_id"] = processed_id
+            return True
+        return False
+    result = await get_user_collection().update_one(
         {"email": email},
-        {
-            "$unset": {
-                "google_access_token": "",
-                "google_refresh_token": "",
-                "token_expiry": "",
-            }
-        },
+        {"$set": {
+            "gmail_label_attention_id": attention_id,
+            "gmail_label_processed_id": processed_id,
+        }},
     )
+    return result.modified_count > 0 or result.matched_count > 0
+
+
+async def update_gmail_history_id(email: str, history_id: str) -> bool:
+    if not is_db_connected():
+        if email in _memory_users:
+            _memory_users[email]["gmail_history_id"] = history_id
+            return True
+        return False
+    result = await get_user_collection().update_one(
+        {"email": email},
+        {"$set": {"gmail_history_id": history_id}},
+    )
+    return result.modified_count > 0

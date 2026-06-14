@@ -1,16 +1,20 @@
-# low-level Gmail API wrapper
 import os
+import time
+import logging
+import asyncio
 
-# Required for http://localhost OAuth in development
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request as GoogleRequest
-from config import settings
 
-# Scopes needed: read emails, send emails, manage drafts, manage labels
+from config import settings
+from db.mongodb import get_db, is_db_connected
+
+logger = logging.getLogger("google_client")
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
@@ -33,16 +37,10 @@ CLIENT_CONFIG = {
 
 
 def get_oauth_flow() -> Flow:
-    flow = Flow.from_client_config(
-        CLIENT_CONFIG,
-        scopes=SCOPES,
-        redirect_uri=settings.google_redirect_uri,
-    )
-    return flow
+    return Flow.from_client_config(CLIENT_CONFIG, scopes=SCOPES, redirect_uri=settings.google_redirect_uri)
 
 
 def get_auth_url() -> tuple[str, str, str | None]:
-    """Returns (auth_url, state, code_verifier) for server-side OAuth state storage."""
     flow = get_oauth_flow()
     auth_url, state = flow.authorization_url(
         access_type="offline",
@@ -54,64 +52,9 @@ def get_auth_url() -> tuple[str, str, str | None]:
 
 
 def exchange_code(code: str, code_verifier: str | None) -> dict:
-    """Exchange auth code for tokens using the PKCE verifier from the login step."""
     flow = get_oauth_flow()
     flow.fetch_token(code=code, code_verifier=code_verifier)
-    creds = flow.credentials
-    return _creds_to_dict(creds)
-
-
-def refresh_token_if_needed(token_dict: dict) -> dict:
-    """
-    Takes stored token dict, refreshes if expired, returns updated dict.
-    Call this before every Gmail API operation.
-    """
-    creds = Credentials(
-        token=token_dict.get("access_token"),
-        refresh_token=token_dict.get("refresh_token"),
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=settings.google_client_id,
-        client_secret=settings.google_client_secret,
-        scopes=SCOPES,
-    )
-
-    if creds.expired and creds.refresh_token:
-        creds.refresh(GoogleRequest())
-        print("[OAuth] Access token refreshed")
-
-    return _creds_to_dict(creds)
-
-
-async def get_valid_access_token(email: str) -> str:
-    """Load user tokens, refresh if needed, persist updates, return access token."""
-    from models.user import find_user, upsert_user
-
-    user = await find_user(email)
-    if not user or not user.get("google_access_token"):
-        raise ValueError(f"No Gmail tokens stored for {email}")
-
-    token_dict = {
-        "access_token": user["google_access_token"],
-        "refresh_token": user.get("google_refresh_token"),
-        "expiry": user.get("token_expiry"),
-    }
-    refreshed = refresh_token_if_needed(token_dict)
-
-    if refreshed.get("access_token") != token_dict.get("access_token"):
-        await upsert_user(
-            email=email,
-            token_dict={
-                "access_token": refreshed["access_token"],
-                "refresh_token": refreshed.get("refresh_token"),
-                "expires_in": refreshed.get("expires_in", 3600),
-            },
-            profile={"name": user.get("name"), "picture": user.get("picture")},
-        )
-
-    access_token = refreshed.get("access_token")
-    if not access_token:
-        raise ValueError(f"Could not obtain access token for {email}")
-    return access_token
+    return _creds_to_dict(flow.credentials)
 
 
 def _creds_to_dict(creds: Credentials) -> dict:
@@ -130,3 +73,80 @@ def _creds_to_dict(creds: Credentials) -> dict:
         "expiry": creds.expiry.isoformat() if creds.expiry else None,
         "expires_in": expires_in,
     }
+
+
+def _token_fields_from_user(user: dict) -> dict:
+    if user.get("oauth_token"):
+        oauth = user["oauth_token"]
+        return {
+            "access_token": oauth.get("access_token"),
+            "refresh_token": oauth.get("refresh_token"),
+            "expires_at": oauth.get("expires_at", 0),
+        }
+    return {
+        "access_token": user.get("google_access_token"),
+        "refresh_token": user.get("google_refresh_token"),
+        "expires_at": user.get("token_expiry", 0),
+    }
+
+
+def _build_credentials(token_data: dict) -> Credentials:
+    return Credentials(
+        token=token_data.get("access_token"),
+        refresh_token=token_data.get("refresh_token"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=settings.google_client_id,
+        client_secret=settings.google_client_secret,
+        scopes=SCOPES,
+    )
+
+
+async def _persist_refreshed_tokens(email: str, creds: Credentials, expires_at: float) -> None:
+    if not is_db_connected():
+        return
+    db = get_db()
+    update = {
+        "oauth_token.access_token": creds.token,
+        "oauth_token.expires_at": expires_at,
+        "google_access_token": creds.token,
+        "token_expiry": expires_at,
+    }
+    if creds.refresh_token:
+        update["oauth_token.refresh_token"] = creds.refresh_token
+        update["google_refresh_token"] = creds.refresh_token
+    await db.email_agent_users.update_one({"email": email}, {"$set": update})
+
+
+async def get_gmail_credentials(email: str) -> Credentials:
+    """Return refreshed Credentials for Gmail API calls."""
+    if not is_db_connected():
+        raise ValueError("Database not connected — cannot load OAuth tokens")
+    db = get_db()
+    user = await db.email_agent_users.find_one({"email": email})
+    if not user:
+        raise ValueError(f"No user found for email: {email}")
+
+    token_data = _token_fields_from_user(user)
+    if not token_data.get("access_token"):
+        raise ValueError(f"No OAuth tokens stored for {email}")
+
+    creds = _build_credentials(token_data)
+    expires_at = token_data.get("expires_at") or 0
+
+    if creds.expired or expires_at < time.time() + 60:
+        if not creds.refresh_token:
+            raise ValueError(f"OAuth token expired for {email} and no refresh token present")
+        logger.info(f"Refreshing Gmail token for {email}")
+        await asyncio.to_thread(creds.refresh, GoogleRequest())
+        new_expires = time.time() + 3500
+        await _persist_refreshed_tokens(email, creds, new_expires)
+
+    return creds
+
+
+async def get_valid_access_token(email: str) -> str:
+    """Return a valid access token string (for httpx Gmail REST calls)."""
+    creds = await get_gmail_credentials(email)
+    if not creds.token:
+        raise ValueError(f"Could not obtain access token for {email}")
+    return creds.token

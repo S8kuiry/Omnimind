@@ -1,91 +1,86 @@
-# FastAPI app — email agent server on port 8000
-
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 
-from db.mongodb import connect_db, close_db, is_db_connected
+from db.mongodb import connect_db, close_db
 from routes.auth import router as auth_router
 from routes.emails import router as emails_router
-from routes.agent import router as agents_router
+from routes.agent import router as agent_router
 from routes.cron import router as cron_router
+from routes.webhooks import router as webhooks_router
+from models.seen import ensure_indexes as seen_indexes
+from models.metrics_daily import ensure_indexes as metrics_indexes
+from models.event import ensure_indexes as event_indexes
+from services.ingest_scheduler import start_ingest_scheduler
 from config import settings
-from models.session import ensure_session_indexes
-from models.email import ensure_email_indexes
-from models.queue import ensure_queue_indexes
-from models.event import ensure_event_indexes
-from services.consumer import worker_queue_listener
 
-_worker_task: asyncio.Task | None = None
+logger = logging.getLogger("main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _worker_task
-    try:
-        await connect_db()
-        await ensure_session_indexes()
-        await ensure_email_indexes()
-        await ensure_queue_indexes()
-        await ensure_event_indexes()
-        if is_db_connected():
-            print("[Startup] MongoDB connected and indexes ensured")
-        else:
-            print("[Startup] Running without MongoDB — inbox persistence disabled")
-    except Exception as exc:
-        print(f"[Startup] WARNING: {exc}")
+    # 1. Connect to MongoDB
+    await connect_db()
 
-    _worker_task = asyncio.create_task(worker_queue_listener())
+    # 2. Ensure all indexes (safe to run every startup — MongoDB is idempotent)
+    await seen_indexes()
+    await metrics_indexes()
+    await event_indexes()
+    logger.info("[main] All indexes ensured")
 
+    # 3. Start 15-min ingest scheduler as background daemon
+    # Runs immediately on startup, then every ingest_interval_seconds (900s)
+    scheduler_task = asyncio.create_task(start_ingest_scheduler())
+    logger.info("[main] Ingest scheduler started")
+
+    print("[main] Phase 2 ready")
     yield
 
-    if _worker_task:
-        _worker_task.cancel()
-        try:
-            await _worker_task
-        except asyncio.CancelledError:
-            pass
-    if is_db_connected():
-        await close_db()
+    # Shutdown — cancel scheduler cleanly
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        logger.info("[main] Ingest scheduler stopped")
+
+    await close_db()
 
 
-app = FastAPI(title="Email Agent Server", version="1.0.0", lifespan=lifespan)
-
-_cors_origins = list({
-    settings.frontend_url.rstrip("/"),
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-})
+app = FastAPI(
+    title="Email Agent API",
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=[settings.frontend_url, "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
-
+# ── Routers ────────────────────────────────────────────────────────
 app.include_router(auth_router)
 app.include_router(emails_router)
-app.include_router(agents_router)
+app.include_router(agent_router)
 app.include_router(cron_router)
+app.include_router(webhooks_router)
 
 
+# ── Health ─────────────────────────────────────────────────────────
 @app.get("/")
 async def health():
     return {
-        "status": "Email Agent Server is Running",
-        "version": "1.0.0",
-        "database": "connected" if is_db_connected() else "disconnected",
+        "status": "Email Agent API running",
+        "version": "2.0.0",
+        "phase": 2,
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run("main:app", host="0.0.0.0", port=settings.port, reload=True)

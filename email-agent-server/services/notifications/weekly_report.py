@@ -1,1 +1,0 @@
-# weekly patterns + stats email
