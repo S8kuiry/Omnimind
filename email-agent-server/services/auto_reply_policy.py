@@ -26,29 +26,40 @@ _DELIVERY_FAILURE_SUBJECT_RE = re.compile(
     re.I,
 )
 
-# Job / recruiting — never auto-reply; always surface to attention first
-_JOB_RECRUITING_RE = re.compile(
-    r"job\s+(opening|opportunity|offer|alert|posting|application|position|role)"
-    r"|(?:we'?re|we are)\s+hiring"
-    r"|hiring\s+for"
-    r"|(?:apply|application)\s+(?:now|here|today|link|via)"
-    r"|(?:invited?\s+to\s+apply|please\s+apply|submit\s+your\s+(?:cv|resume))"
-    r"|recruiter|recruitment|talent\s+acquisition|headhunter|staffing"
-    r"|interview\s+(?:invite|invitation|scheduled|request|slot)"
-    r"|(?:naukri|indeed|glassdoor|linkedin\s+jobs?|wellfound|angelist)"
-    r"|placement\s+(?:drive|cell|opportunity)"
-    r"|campus\s+(?:hire|hiring|placement)"
-    r"|(?:new|exciting)\s+(?:role|opportunity)\s+(?:at|for|with)"
-    r"|(?:shortlisted|selected)\s+for\s+(?:the\s+)?(?:role|position|interview)",
+# Job / recruiting — block auto-reply only when content clearly indicates apply/hire intent.
+# Domains alone are NOT enough (avoids blocking all LinkedIn mail).
+
+_JOB_STRONG_RE = re.compile(
+    r"job\s+(?:opening|opportunity|offer|alert|posting|application|position)\b"
+    r"|(?:we'?re|we are)\s+hiring\b"
+    r"|hiring\s+for\s+(?:a\s+)?(?:role|position|engineer|developer|analyst|manager|intern)"
+    r"|(?:apply|application)\s+(?:now|here|today|link|via|online|on\s+our)"
+    r"|(?:invited?\s+to\s+apply|please\s+apply|submit\s+your\s+(?:cv|resume|application))"
+    r"|(?:interview|screening)\s+(?:invite|invitation|scheduled|request|slot|call)"
+    r"|(?:shortlisted|selected)\s+for\s+(?:the\s+)?(?:role|position|interview|next\s+round)"
+    r"|(?:talent|hiring|recruitment)\s+(?:team|partner|specialist|@)"
+    r"|(?:campus|off-?campus)\s+(?:hire|hiring|placement|drive)"
+    r"|(?:ctc|call\s+letter|offer\s+letter)\b"
+    r"|(?:view|see)\s+(?:this\s+)?(?:job|opening|role)\s+(?:at|on)\b"
+    r"|(?:found|matched|recommended)\s+(?:a\s+)?job\s+(?:for|matching)\b",
     re.I,
 )
-_JOB_RECRUITING_DOMAINS = (
-    "linkedin.com",
+
+# Job-board senders — flag only together with job-like subject/snippet
+_JOB_BOARD_HINT_RE = re.compile(
+    r"\b(?:job|role|opening|position|hire|hiring|apply|application|interview|recruiter|vacancy|ctc)\b",
+    re.I,
+)
+
+_JOB_BOARD_SENDERS = (
     "jobs.linkedin.com",
-    "noreply@linkedin.com",
-    "naukri.com",
+    "jobalerts.linkedin.com",
+    "e.linkedin.com",
+    "notifications.naukri.com",
+    "jobalerts.naukri.com",
     "info@naukri.com",
-    "indeed.com",
+    "jobalerts.indeed.com",
+    "indeedemail.com",
     "glassdoor.com",
     "wellfound.com",
     "angel.co",
@@ -57,6 +68,29 @@ _JOB_RECRUITING_DOMAINS = (
     "workday.com",
     "myworkday.com",
     "smartrecruiters.com",
+    "ashbyhq.com",
+    "jobvite.com",
+    "icims.com",
+    "bamboohr.com",
+    "recruitee.com",
+    "teamtailor.com",
+    "cutshortlist.com",
+    "hirist.com",
+    "instahyre.com",
+    "foundit.in",
+    "monster.com",
+    "shine.com",
+    "timesjobs.com",
+    "internshala.com",
+    "unstop.com",
+    "superset.co",
+    "mettl.com",
+    "getmettl.com",
+    "hackerrank.com",
+    "careers.",
+    "talent@",
+    "recruiting@",
+    "hiring@",
 )
 
 
@@ -114,11 +148,24 @@ def _email_text_blob(meta: dict) -> str:
 
 
 def is_job_recruiting_meta(meta: dict) -> bool:
-    """Job offers, apply links, and recruiter mail must reach the user before any auto-reply."""
-    addr = (meta.get("from_address") or "").lower()
-    if any(domain in addr for domain in _JOB_RECRUITING_DOMAINS):
+    """
+    Job offers / apply invites → attention queue, never auto-reply.
+    Content-first so routine mail from job sites can still auto-reply when appropriate.
+    """
+    blob = _email_text_blob(meta)
+    if _JOB_STRONG_RE.search(blob):
         return True
-    return bool(_JOB_RECRUITING_RE.search(_email_text_blob(meta)))
+
+    addr = (meta.get("from_address") or "").lower()
+    if any(marker in addr for marker in _JOB_BOARD_SENDERS) and _JOB_BOARD_HINT_RE.search(blob):
+        return True
+
+    name = (meta.get("from_name") or "").lower()
+    if re.search(r"\b(recruiter|talent acquisition|staffing|hr)\b", name, re.I):
+        if _JOB_BOARD_HINT_RE.search(blob):
+            return True
+
+    return False
 
 
 def apply_triage_overrides(email_meta: dict, triage: dict) -> dict:
@@ -158,10 +205,10 @@ def should_auto_reply(
     if category in ("spam", "newsletter", "critical"):
         return False, f"category_{category}"
 
-    if priority == "high":
-        return False, "priority_high"
-
     if category not in ("personal", "work"):
         return False, f"category_{category}"
+
+    if priority == "high" and needs_manual:
+        return False, "priority_high_needs_review"
 
     return True, f"{category}_auto_reply"

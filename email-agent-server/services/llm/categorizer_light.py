@@ -106,13 +106,15 @@ async def triage_email_light(email_meta: dict) -> dict:
         "Categories: critical (urgent/billing/legal), work (B2B, collaboration, internal updates), "
         "personal (friends/family), newsletter (digests/marketing lists), spam.\n\n"
         "needs_manual_review rules:\n"
-        "- ALWAYS true for: job postings, job offers, interview invites, recruiter outreach, "
-        "apply-here links, hiring messages, LinkedIn/Naukri/Indeed job alerts, salary/role offers, "
-        "anything where the user must decide before responding.\n"
-        "- true: negotiations, complaints, ambiguous requests, high-stakes decisions.\n"
-        "- false ONLY for: routine low-stakes work FYI (scheduling confirmations, simple thanks, "
-        "informational updates with no decision needed), or trivial personal chit-chat.\n"
-        "When uncertain, default to true. Never set false for recruiting or job-application mail."
+        "- ALWAYS true for: job postings, job offers, interview invites, apply-here links, "
+        "hiring messages, recruiter outreach, salary/role offers — user must decide first.\n"
+        "- true: negotiations, complaints, contracts, ambiguous requests, high-stakes decisions.\n"
+        "- false (auto-reply OK): routine work mail — meeting confirmations, status FYI, "
+        "simple thanks, scheduling pings, internal team updates, low-stakes acknowledgments.\n"
+        "- false: trivial personal chit-chat.\n"
+        "If clearly a job/application email → needs_manual_review=true. "
+        "If clearly routine work with no decision needed → needs_manual_review=false. "
+        "When uncertain about jobs, default true; for routine work FYI prefer false."
     )
 
     try:
