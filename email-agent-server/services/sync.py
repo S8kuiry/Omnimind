@@ -33,6 +33,7 @@ async def sync_user_inbox(user_email: str, batch_size: int | None = None) -> dic
             creds=creds,
             attention_label_id=attention_id,
             max_results=limit,
+            user_email=user_email,
         )
 
     queued = 0

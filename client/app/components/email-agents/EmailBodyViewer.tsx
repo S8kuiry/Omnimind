@@ -5,12 +5,12 @@ import { useEffect, useRef, useMemo } from 'react'
 const EMAIL_DOC_STYLES = `
   html, body {
     margin: 0;
-    padding: 0;
-    background: transparent;
-    color: rgba(255, 255, 255, 0.82);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 13px;
-    line-height: 1.55;
+    padding: 16px;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
     word-wrap: break-word;
     overflow-wrap: anywhere;
   }
@@ -110,13 +110,24 @@ export default function EmailBodyViewer({ bodyHtml, bodyText, className = '' }: 
   }, [srcDoc])
 
   return (
-    <iframe
-      ref={iframeRef}
-      title="Email body"
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      srcDoc={srcDoc}
-      className={`w-full border-0 rounded-lg min-h-[120px] ${className}`}
-      style={{ background: 'transparent' }}
-    />
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{
+        background: bodyHtml?.trim() ? '#ffffff' : 'rgba(255,255,255,0.04)',
+        border: bodyHtml?.trim()
+          ? '1px solid rgba(255,255,255,0.12)'
+          : '1px solid rgba(255,255,255,0.08)',
+        boxShadow: bodyHtml?.trim() ? '0 4px 24px rgba(0,0,0,0.35)' : undefined,
+      }}
+    >
+      <iframe
+        ref={iframeRef}
+        title="Email body"
+        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={srcDoc}
+        className={`w-full border-0 min-h-[120px] ${className}`}
+        style={{ background: bodyHtml?.trim() ? '#ffffff' : 'transparent' }}
+      />
+    </div>
   )
 }

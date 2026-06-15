@@ -25,6 +25,7 @@ from lib.gmail_client import (
     fetch_message_detail,
     send_gmail_reply,
     modify_labels,
+    finalize_outbound_reply,
 )
 from config import settings
 from models.user import find_user_by_email
@@ -34,7 +35,7 @@ from models.metrics_daily import get_rollup, get_today
 from services.attention_cache import attention_cache
 from services.ws_manager import ws_manager
 from services.email_pipeline import process_incoming_email_pipeline, _build_card
-from services.auto_reply_policy import is_system_drop_meta
+from services.auto_reply_policy import is_system_drop_meta, is_outbound_queue_meta
 from services.session_stats import session_stats
 from services.llm.summarizer import generate_full_summary, regenerate_draft_with_tone
 
@@ -87,18 +88,26 @@ def _enrich_notifications(cards: list[dict]) -> list[dict]:
     return enriched
 
 
-def _partition_system_drops(cards: list[dict]) -> tuple[list[dict], list[str]]:
-    """Split attention cards into keep vs silently-drop (mail delivery failures, etc.)."""
+def _partition_attention_cards(
+    cards: list[dict],
+    user_email: str,
+) -> tuple[list[dict], list[str]]:
+    """Split into keep vs purge (system drops + outbound/sent mislabeled as Attention)."""
     keep: list[dict] = []
-    drop_ids: list[str] = []
+    purge_ids: list[str] = []
     for card in cards:
-        if is_system_drop_meta(card):
+        if is_system_drop_meta(card) or is_outbound_queue_meta(card, user_email):
             msg_id = card.get("id") or card.get("provider_message_id") or card.get("_id")
             if msg_id:
-                drop_ids.append(str(msg_id))
+                purge_ids.append(str(msg_id))
             continue
         keep.append(card)
-    return keep, drop_ids
+    return keep, purge_ids
+
+
+def _partition_system_drops(cards: list[dict]) -> tuple[list[dict], list[str]]:
+    """Backward-compatible wrapper."""
+    return _partition_attention_cards(cards, "")
 
 
 async def _silently_purge_system_drops(
@@ -170,7 +179,7 @@ async def _load_attention_list(user: dict, user_email: str, *, force_refresh: bo
     if not force_refresh:
         cached = attention_cache.get_emails(user_email)
         if cached is not None:
-            keep, drop_ids = _partition_system_drops(cached)
+            keep, drop_ids = _partition_attention_cards(cached, user_email)
             if drop_ids:
                 attention_cache.set_emails(user_email, keep)
                 asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
@@ -186,8 +195,9 @@ async def _load_attention_list(user: dict, user_email: str, *, force_refresh: bo
             fetch_attention_labeled_emails,
             creds=creds,
             attention_label_id=attention_id,
+            user_email=user_email,
         )
-        keep, drop_ids = _partition_system_drops(live)
+        keep, drop_ids = _partition_attention_cards(live, user_email)
         if drop_ids:
             asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
         notifications = _enrich_notifications(keep)
@@ -197,7 +207,7 @@ async def _load_attention_list(user: dict, user_email: str, *, force_refresh: bo
         # Serve stale cache rather than failing — no DB gate
         fallback = attention_cache.get_emails_even_expired(user_email)
         if fallback is not None:
-            keep, drop_ids = _partition_system_drops(fallback)
+            keep, drop_ids = _partition_attention_cards(fallback, user_email)
             if drop_ids:
                 asyncio.create_task(_silently_purge_system_drops(user, user_email, drop_ids))
             return keep
@@ -400,12 +410,19 @@ async def send_reply(message_id: str, payload: SendReplyRequest):
     user = await _require_user(payload.user_email)
     creds = await get_gmail_credentials(payload.user_email)
 
-    await asyncio.to_thread(
+    sent_result = await asyncio.to_thread(
         send_gmail_reply, creds=creds, message_id=message_id, body=payload.body
     )
 
     processed_id = user.get("gmail_label_processed_id")
     attention_id = user.get("gmail_label_attention_id")
+    await asyncio.to_thread(
+        finalize_outbound_reply,
+        creds,
+        sent_result,
+        attention_label_id=attention_id,
+        processed_label_id=processed_id,
+    )
     remove_ids = [lid for lid in [attention_id, "UNREAD"] if lid]
     await asyncio.to_thread(
         modify_labels,

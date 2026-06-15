@@ -42,7 +42,7 @@ async def _analyze_content_core(email_data: dict, tone_instruction: str) -> dict
             "I will follow up shortly.\n\nBest regards."
         )
         return {
-            "summary": f"• Message from {sender} about: {subject}",
+            "summary": f"Message from {sender} about: {subject}",
             "draft_body": fallback,
             "suggested_draft": fallback,
         }

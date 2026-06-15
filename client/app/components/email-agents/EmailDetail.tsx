@@ -9,6 +9,7 @@ import {
   type EmailItem,
 } from '@/lib/automationApi'
 import EmailBodyViewer from './EmailBodyViewer'
+import { decodeEmailText, isEmailFromUser } from '@/lib/emailText'
 
 const PRIORITY_STYLE: Record<string, { bg: string; text: string }> = {
   high:   { bg: 'rgba(255,80,80,0.1)',   text: 'rgba(255,110,110,0.9)' },
@@ -47,7 +48,7 @@ export default function EmailDetail({ email, userEmail, onDelete, onClose, onDis
   const [sent, setSent]             = useState(false)
   const [error, setError]           = useState('')
 
-  const showReply = !sent && !readOnly
+  const showReply = !sent && !readOnly && !isEmailFromUser(email, userEmail)
   const isAutoReplied = readOnly || email.llm_action === 'auto_replied'
 
   // Lazy-load full HTML + images only when this email is opened
@@ -141,7 +142,7 @@ export default function EmailDetail({ email, userEmail, onDelete, onClose, onDis
       <div className="flex items-start justify-between mb-5 flex-shrink-0">
         <div className="min-w-0 flex-1 pr-4">
           <h2 className="text-sm font-medium mb-1.5" style={{ color: 'rgba(255,255,255,0.9)' }}>
-            {email.subject || '(no subject)'}
+            {decodeEmailText(email.subject || '(no subject)')}
           </h2>
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
             {email.from_name || email.from_address}
@@ -181,7 +182,7 @@ export default function EmailDetail({ email, userEmail, onDelete, onClose, onDis
       {!analyzing && summary && (
         <div className="mb-5 px-4 py-3.5 rounded-xl text-xs leading-relaxed flex-shrink-0"
           style={{ background: 'rgba(210,140,160,0.04)', border: '1px solid rgba(210,140,160,0.12)', color: 'rgba(255,255,255,0.65)' }}>
-          <span className="font-semibold" style={{ color: 'rgba(210,140,160,0.85)' }}>Summary · </span>
+          <span className="font-semibold" style={{ color: 'rgba(210,140,160,0.85)' }}>Summary :</span>
           {summary}
         </div>
       )}
@@ -224,6 +225,13 @@ export default function EmailDetail({ email, userEmail, onDelete, onClose, onDis
             <Send size={11} />
             {sending ? 'Sending…' : 'Send Reply'}
           </button>
+        </div>
+      ) : isEmailFromUser(email, userEmail) ? (
+        <div className="flex-shrink-0 pt-3 border-t border-white/10">
+          <div className="rounded-xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.55)' }}>
+            This is your sent reply — it won&apos;t appear in the attention queue after refresh.
+          </div>
         </div>
       ) : isAutoReplied ? (
         <div className="flex-shrink-0 pt-3 border-t border-white/10">

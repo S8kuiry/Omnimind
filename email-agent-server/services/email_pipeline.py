@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from config import settings
-from lib.gmail_client import modify_labels, send_gmail_reply, thread_already_handled
+from lib.gmail_client import modify_labels, send_gmail_reply, thread_already_handled, finalize_outbound_reply
 from services.llm.categorizer_light import triage_email_light
 from services.llm.auto_reply import generate_auto_reply_body
 from services.auto_reply_policy import (
@@ -133,8 +133,15 @@ async def process_incoming_email_pipeline(
                 reply_body = await generate_auto_reply_body(email_meta, category=category)
                 subject = email_meta.get("subject", "")
                 snippet = email_meta.get("snippet", "")
-                await asyncio.to_thread(
+                sent_result = await asyncio.to_thread(
                     send_gmail_reply, creds=creds, message_id=message_id, body=reply_body
+                )
+                await asyncio.to_thread(
+                    finalize_outbound_reply,
+                    creds,
+                    sent_result,
+                    attention_label_id=attention_label_id,
+                    processed_label_id=processed_label_id,
                 )
                 session_stats.record_auto_reply(user_email)
                 await _mark_processed(

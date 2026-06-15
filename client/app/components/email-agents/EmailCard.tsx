@@ -1,5 +1,6 @@
 'use client'
 import { EmailItem } from '@/lib/automationApi'
+import { decodeEmailText, isEmailFromUser } from '@/lib/emailText'
 
 // Structured styles for the new priority micro-badges
 const PRIORITY_STYLE: Record<string, { text: string; bg: string; border: string }> = {
@@ -30,7 +31,7 @@ const CATEGORY_COLOR: Record<string, string> = {
 }
 
 export default function EmailCard({
-  email, selected, onClick, readOnly = false,
+  email, selected, onClick, userEmail, readOnly = false,
 }: {
   email: EmailItem
   selected: boolean
@@ -39,7 +40,13 @@ export default function EmailCard({
   readOnly?: boolean
 }) {
   const isAutoReplied = readOnly || email.llm_action === 'auto_replied'
-  const isUnread = !isAutoReplied && !email.is_read
+  const isFromSelf = isEmailFromUser(email, userEmail)
+  const isUnread = !isAutoReplied && !email.is_read && !isFromSelf
+  const preview = decodeEmailText(
+    isAutoReplied
+      ? (email.reply_preview || email.snippet || '')
+      : (email.summary || email.snippet || '')
+  )
   const pStyle = PRIORITY_STYLE[email.priority] || {
     text: 'rgba(255,255,255,0.4)',
     bg: 'rgba(255,255,255,0.04)',
@@ -123,7 +130,7 @@ export default function EmailCard({
               color: isUnread ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)',
             }}
           >
-            {email.subject}
+            {decodeEmailText(email.subject || '(no subject)')}
           </p>
 
           {/* Summary/Snippet body */}
@@ -131,11 +138,17 @@ export default function EmailCard({
             className="text-[10px] truncate leading-relaxed transition-colors"
             style={{ color: isUnread ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.22)' }}
           >
-            {isAutoReplied ? (email.reply_preview || email.snippet) : (email.summary || email.snippet)}
+            {preview}
           </p>
 
           {/* System LLM automation status flags */}
           <div className="flex items-center gap-1.5 mt-2">
+            {isFromSelf && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full"
+                style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                your reply
+              </span>
+            )}
             {isAutoReplied && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"
                 style={{ background: 'rgba(80,200,120,0.1)', color: 'rgba(100,220,130,0.85)', border: '1px solid rgba(80,200,120,0.2)' }}>
@@ -148,7 +161,7 @@ export default function EmailCard({
                 draft ready
               </span>
             )}
-            {email.llm_action === 'alert_sent' && !email.draft_body && !isAutoReplied && (
+            {email.llm_action === 'alert_sent' && !email.draft_body && !isAutoReplied && !isFromSelf && (
               <span className="text-[8px] px-1.5 py-0.5 rounded-full"
                 style={{ background: 'rgba(100,150,255,0.1)', color: 'rgba(100,150,255,0.7)', border: '1px solid rgba(100,150,255,0.2)' }}>
                 needs review

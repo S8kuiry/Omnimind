@@ -115,7 +115,7 @@ def _parse_message_payload(msg_data: dict) -> dict:
         "id": msg_data.get("id"),
         "threadId": msg_data.get("threadId"),
         "labelIds": msg_data.get("labelIds", []),
-        "snippet": msg_data.get("snippet", ""),
+        "snippet": html.unescape(msg_data.get("snippet", "")),
         "subject": header_map.get("subject", "(No Subject)"),
         "date": header_map.get("date", ""),
         "from_name": from_name if from_name else from_address,
@@ -179,12 +179,14 @@ def fetch_attention_labeled_emails(
     creds: Credentials,
     attention_label_id: str,
     max_results: int | None = None,
+    user_email: str = "",
 ) -> list[dict]:
     """
     Queries Gmail for messages with the OmniMind/Attention label.
-    Paginates so the queue is not capped at the first API page.
+    Excludes outbound SENT/DRAFT and the user's own replies.
     """
     from config import settings
+    from services.auto_reply_policy import is_outbound_queue_meta, is_system_drop_meta
 
     limit = max_results or settings.attention_list_max_results
     service = _build_service(creds)
@@ -197,8 +199,13 @@ def fetch_attention_labeled_emails(
         hydrated_cards = []
         for msg_stub in stubs:
             parsed = _hydrate_message_metadata(service, msg_stub["id"], full_body=False)
-            if parsed:
-                hydrated_cards.append(parsed)
+            if not parsed:
+                continue
+            if is_outbound_queue_meta(parsed, user_email):
+                continue
+            if is_system_drop_meta(parsed):
+                continue
+            hydrated_cards.append(parsed)
         return hydrated_cards
     except Exception as e:
         logger.error(f"Failed to query attention labeled email lists: {str(e)}")
@@ -418,6 +425,26 @@ def modify_labels(creds: Credentials, message_id: str, add_label_ids: list = Non
         body["removeLabelIds"] = remove_label_ids
         
     return service.users().messages().modify(userId="me", id=message_id, body=body).execute()
+
+
+def finalize_outbound_reply(
+    creds: Credentials,
+    sent_result: dict,
+    *,
+    attention_label_id: str | None = None,
+    processed_label_id: str | None = None,
+) -> None:
+    """Ensure the sent reply never keeps the Attention label."""
+    sent_id = sent_result.get("id")
+    if not sent_id:
+        return
+    remove_ids = [lid for lid in (attention_label_id, "UNREAD") if lid]
+    modify_labels(
+        creds=creds,
+        message_id=sent_id,
+        add_label_ids=[processed_label_id] if processed_label_id else None,
+        remove_label_ids=remove_ids or None,
+    )
 
 
 def send_gmail_reply(creds: Credentials, message_id: str, body: str):

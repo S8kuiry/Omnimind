@@ -29,6 +29,7 @@ import EmailCard from './EmailCard'
 import EmailStatsBar from './EmailStats'
 import EmailDetail from './EmailDetail'
 import DeleteConfirmationModal from './DeleteConfirmationModal'
+import { isEmailFromUser } from '@/lib/emailText'
 
 const CATEGORIES = ['all', 'work', 'personal', 'bill', 'newsletter', 'spam', 'critical', 'auto-replied']
 const PRIORITIES = ['all', 'high', 'medium', 'low']
@@ -101,6 +102,16 @@ function metricsFromWS(payload: MetricsUpdatedPayload): Partial<EmailStats> {
     inboxCleanedTotal: payload.inbox_cleaned_total,
     today_processed: payload.auto_replies_total + payload.system_dropped_total,
   }
+}
+
+function isValidAutoRepliedItem(item: AutoRepliedItem): boolean {
+  return Boolean(
+    item.subject?.trim()
+    || item.from_name?.trim()
+    || item.from_address?.trim()
+    || item.snippet?.trim()
+    || item.reply_preview?.trim()
+  )
 }
 
 function autoRepliedToEmailItem(item: AutoRepliedItem): EmailItem {
@@ -303,10 +314,14 @@ export default function EmailDashboard({
   const visibleEmails = useMemo(() => {
     if (isAutoRepliedTab) {
       return autoRepliedList
+        .filter(isValidAutoRepliedItem)
         .map(autoRepliedToEmailItem)
         .filter(e => priority === 'all' || e.priority === priority)
     }
-    return allEmails.filter(e => matchesFilters(e, category, priority))
+    return allEmails.filter(e => {
+      if (!isAutoRepliedTab && isEmailFromUser(e, userEmail)) return false
+      return matchesFilters(e, category, priority)
+    })
   }, [allEmails, category, priority, autoRepliedList, isAutoRepliedTab])
 
   const applyStats = useCallback((s: EmailStats, queue: EmailItem[]) => {
@@ -418,7 +433,7 @@ export default function EmailDashboard({
     setAutoRepliedLoading(true)
     fetchAutoRepliedToday(userEmail).then(data => {
       if (cancelled) return
-      setAutoRepliedList(data.items)
+      setAutoRepliedList(data.items.filter(isValidAutoRepliedItem))
       setStats(s => {
         if (!s) return s
         const next = { ...s, autoSendCountToday: data.count_today }
@@ -445,6 +460,7 @@ export default function EmailDashboard({
       onEmailRemoved: (emailId) => removeEmail(emailId),
       onEmailRead: (emailId) => applyReadState(emailId, true),
       onAutoReplied: (item) => {
+        if (!isValidAutoRepliedItem(item)) return
         setAutoRepliedList(prev => {
           if (prev.some(i => i.message_id === item.message_id)) return prev
           return [item, ...prev]
@@ -520,7 +536,7 @@ export default function EmailDashboard({
       }
       if (isAutoRepliedTab) {
         const autoData = await fetchAutoRepliedToday(userEmail)
-        setAutoRepliedList(autoData.items)
+        setAutoRepliedList(autoData.items.filter(isValidAutoRepliedItem))
         setStats(s => {
           if (!s) return s
           const next = { ...s, autoSendCountToday: autoData.count_today }

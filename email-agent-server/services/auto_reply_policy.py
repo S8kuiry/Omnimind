@@ -168,6 +168,20 @@ def is_job_recruiting_meta(meta: dict) -> bool:
     return False
 
 
+def is_outbound_queue_meta(meta: dict, user_email: str = "") -> bool:
+    """Sent mail or the user's own replies must not appear in the attention queue."""
+    labels = meta.get("labelIds") or []
+    if "SENT" in labels or "DRAFT" in labels:
+        return True
+
+    user = (user_email or "").strip().lower()
+    addr = (meta.get("from_address") or "").strip().lower()
+    if user and addr and addr == user:
+        return True
+
+    return False
+
+
 def apply_triage_overrides(email_meta: dict, triage: dict) -> dict:
     """Hard overrides on LLM triage — job mail always needs manual review."""
     result = dict(triage)

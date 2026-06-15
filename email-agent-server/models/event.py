@@ -147,7 +147,7 @@ async def get_today_auto_replies(user_email: str, limit: int = 50) -> list[dict]
     cursor = col.find(
         {
             "user_email": user_email,
-            "event_type": {"$in": ["auto_replied", "auto_resolved"]},
+            "event_type": "auto_replied",
             "timestamp": {"$gte": start},
         },
         projection={"_id": 0},
