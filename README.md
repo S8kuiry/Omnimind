@@ -393,8 +393,7 @@ If you're building something similar and want to talk architecture, open an issu
 
 <div align="center">
 
-Built with obsession by [Subharthy](https://linkedin.com/in/[yourhandle])
 
-⭐ Star this repo if it helped you understand how to build real AI systems
+
 
 </div>
