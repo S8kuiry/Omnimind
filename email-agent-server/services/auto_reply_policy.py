@@ -26,6 +26,39 @@ _DELIVERY_FAILURE_SUBJECT_RE = re.compile(
     re.I,
 )
 
+# Job / recruiting — never auto-reply; always surface to attention first
+_JOB_RECRUITING_RE = re.compile(
+    r"job\s+(opening|opportunity|offer|alert|posting|application|position|role)"
+    r"|(?:we'?re|we are)\s+hiring"
+    r"|hiring\s+for"
+    r"|(?:apply|application)\s+(?:now|here|today|link|via)"
+    r"|(?:invited?\s+to\s+apply|please\s+apply|submit\s+your\s+(?:cv|resume))"
+    r"|recruiter|recruitment|talent\s+acquisition|headhunter|staffing"
+    r"|interview\s+(?:invite|invitation|scheduled|request|slot)"
+    r"|(?:naukri|indeed|glassdoor|linkedin\s+jobs?|wellfound|angelist)"
+    r"|placement\s+(?:drive|cell|opportunity)"
+    r"|campus\s+(?:hire|hiring|placement)"
+    r"|(?:new|exciting)\s+(?:role|opportunity)\s+(?:at|for|with)"
+    r"|(?:shortlisted|selected)\s+for\s+(?:the\s+)?(?:role|position|interview)",
+    re.I,
+)
+_JOB_RECRUITING_DOMAINS = (
+    "linkedin.com",
+    "jobs.linkedin.com",
+    "noreply@linkedin.com",
+    "naukri.com",
+    "info@naukri.com",
+    "indeed.com",
+    "glassdoor.com",
+    "wellfound.com",
+    "angel.co",
+    "greenhouse.io",
+    "lever.co",
+    "workday.com",
+    "myworkday.com",
+    "smartrecruiters.com",
+)
+
 
 def is_replyable_address(from_address: str) -> bool:
     """False when SMTP cannot deliver a human reply to this sender."""
@@ -73,6 +106,31 @@ def is_system_drop_meta(meta: dict) -> bool:
     )
 
 
+def _email_text_blob(meta: dict) -> str:
+    return " ".join(
+        str(meta.get(k) or "")
+        for k in ("subject", "snippet", "body_text", "summary", "from_name", "from_address")
+    )
+
+
+def is_job_recruiting_meta(meta: dict) -> bool:
+    """Job offers, apply links, and recruiter mail must reach the user before any auto-reply."""
+    addr = (meta.get("from_address") or "").lower()
+    if any(domain in addr for domain in _JOB_RECRUITING_DOMAINS):
+        return True
+    return bool(_JOB_RECRUITING_RE.search(_email_text_blob(meta)))
+
+
+def apply_triage_overrides(email_meta: dict, triage: dict) -> dict:
+    """Hard overrides on LLM triage — job mail always needs manual review."""
+    result = dict(triage)
+    if is_job_recruiting_meta(email_meta):
+        result["needs_manual_review"] = True
+        if result.get("priority") == "low":
+            result["priority"] = "medium"
+    return result
+
+
 def should_auto_reply(
     email_meta: dict,
     *,
@@ -90,6 +148,9 @@ def should_auto_reply(
 
     if not is_replyable_address(email_meta.get("from_address") or ""):
         return False, "non_replyable_sender"
+
+    if is_job_recruiting_meta(email_meta):
+        return False, "job_recruiting_requires_attention"
 
     if needs_manual:
         return False, "needs_manual_review"

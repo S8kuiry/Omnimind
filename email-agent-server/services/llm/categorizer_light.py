@@ -103,14 +103,16 @@ async def triage_email_light(email_meta: dict) -> dict:
     system_instruction = (
         "You are an elite, high-throughput email parsing engine. "
         "Analyze the metadata inside <incoming_email> tags.\n\n"
-        "Categories: critical (urgent/billing/legal), work (B2B, recruiters, collaboration), "
+        "Categories: critical (urgent/billing/legal), work (B2B, collaboration, internal updates), "
         "personal (friends/family), newsletter (digests/marketing lists), spam.\n\n"
         "needs_manual_review rules:\n"
-        "- true: requires human judgment — negotiations, complaints, ambiguous requests, "
-        "high-stakes decisions, critical priority.\n"
-        "- false: routine mail safe for a brief auto-acknowledgment — simple greetings, "
-        "scheduling pings, informational updates, recruiter outreach the user may want acknowledged.\n"
-        "When uncertain, default to true."
+        "- ALWAYS true for: job postings, job offers, interview invites, recruiter outreach, "
+        "apply-here links, hiring messages, LinkedIn/Naukri/Indeed job alerts, salary/role offers, "
+        "anything where the user must decide before responding.\n"
+        "- true: negotiations, complaints, ambiguous requests, high-stakes decisions.\n"
+        "- false ONLY for: routine low-stakes work FYI (scheduling confirmations, simple thanks, "
+        "informational updates with no decision needed), or trivial personal chit-chat.\n"
+        "When uncertain, default to true. Never set false for recruiting or job-application mail."
     )
 
     try:
@@ -131,11 +133,10 @@ async def triage_email_light(email_meta: dict) -> dict:
         # Print the AI's thought processes inside your backend terminal logs for debugging
         logger.info(f"[triage] Email {validated_input.id} Logic: {data.get('reasoning')}")
 
-        # ── THE FILTER: Return the exact shape your frontend expects ───────
         return {
             "category": data.get("category", "work"),
             "priority": data.get("priority", "medium"),
-            "needs_manual_review": data.get("needs_manual_review", True)
+            "needs_manual_review": data.get("needs_manual_review", True),
         }
 
     except Exception as exc:

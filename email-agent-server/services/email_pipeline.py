@@ -2,10 +2,15 @@ import asyncio
 import logging
 
 from config import settings
-from lib.gmail_client import modify_labels, send_gmail_reply
+from lib.gmail_client import modify_labels, send_gmail_reply, thread_already_handled
 from services.llm.categorizer_light import triage_email_light
 from services.llm.auto_reply import generate_auto_reply_body
-from services.auto_reply_policy import should_auto_reply, is_system_drop_meta
+from services.auto_reply_policy import (
+    should_auto_reply,
+    is_system_drop_meta,
+    is_job_recruiting_meta,
+    apply_triage_overrides,
+)
 from models.event import log_agent_event
 from models.metrics_daily import get_today
 from services.session_stats import session_stats
@@ -67,7 +72,35 @@ async def process_incoming_email_pipeline(
             if attention_label_id and attention_label_id in label_ids and not reprocess_attention:
                 return
 
+            thread_id = email_meta.get("threadId") or ""
+            if thread_id and not is_job_recruiting_meta(email_meta):
+                already_handled = await asyncio.to_thread(
+                    thread_already_handled,
+                    creds,
+                    thread_id,
+                    processed_label_id,
+                    message_id,
+                )
+                if already_handled:
+                    await _mark_processed(
+                        creds=creds,
+                        message_id=message_id,
+                        processed_label_id=processed_label_id,
+                        attention_label_id=attention_label_id,
+                        label_ids=label_ids,
+                    )
+                    attention_cache.invalidate_email(user_email, message_id)
+                    await log_agent_event(
+                        user_email,
+                        "auto_resolved",
+                        message_id=message_id,
+                        meta={"reason": "thread_already_handled"},
+                    )
+                    logger.info(f"Thread follow-up {message_id} marked processed (already handled)")
+                    return
+
             triage = await triage_email_light(email_meta)
+            triage = apply_triage_overrides(email_meta, triage)
             category = triage.get("category", "work")
             priority = triage.get("priority", "medium")
             needs_manual = triage.get("needs_manual_review", True)
@@ -98,6 +131,8 @@ async def process_incoming_email_pipeline(
 
             if allow_auto:
                 reply_body = await generate_auto_reply_body(email_meta, category=category)
+                subject = email_meta.get("subject", "")
+                snippet = email_meta.get("snippet", "")
                 await asyncio.to_thread(
                     send_gmail_reply, creds=creds, message_id=message_id, body=reply_body
                 )

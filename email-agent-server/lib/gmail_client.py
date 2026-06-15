@@ -374,6 +374,40 @@ def fetch_message_detail(creds: Credentials, message_id: str) -> dict:
 
 # ─── ENGINE MUTATION ACTIONS ────────────────────────────────────────
 
+def thread_already_handled(
+    creds: Credentials,
+    thread_id: str,
+    processed_label_id: str,
+    current_message_id: str,
+) -> bool:
+    """
+    True when this thread already has a Processed message or an outbound reply.
+    Used to skip re-queuing routine follow-ups to the attention inbox.
+    """
+    if not thread_id:
+        return False
+    service = _build_service(creds)
+    try:
+        thread = service.users().threads().get(
+            userId="me",
+            id=thread_id,
+            format="minimal",
+        ).execute()
+    except Exception:
+        return False
+
+    for msg in thread.get("messages", []):
+        msg_id = msg.get("id")
+        if not msg_id or msg_id == current_message_id:
+            continue
+        labels = msg.get("labelIds", [])
+        if processed_label_id and processed_label_id in labels:
+            return True
+        if "SENT" in labels:
+            return True
+    return False
+
+
 def modify_labels(creds: Credentials, message_id: str, add_label_ids: list = None, remove_label_ids: list = None):
     """Applies or clears label IDs from a targeted email message thread."""
     service = _build_service(creds)
