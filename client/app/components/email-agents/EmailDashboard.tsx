@@ -298,13 +298,18 @@ export default function EmailDashboard({
   onStatsUpdatedRef.current = onStatsUpdated
 
   const [initialFetchDone, setInitialFetchDone] = useState(false)
+  const initialFetchDoneRef = useRef(false)
+
+  useEffect(() => {
+    initialFetchDoneRef.current = initialFetchDone
+  }, [initialFetchDone])
 
   const notifyParentStats = useCallback((synced: EmailStats) => {
     queueMicrotask(() => onStatsUpdatedRef.current?.(synced))
   }, [])
 
-  /** Empty queue before first server fetch — avoid flashing 0 pending / empty inbox */
-  const isBootstrapping = !initialFetchDone && !isAutoRepliedTab && allEmails.length === 0
+  /** Wait for Gmail sync before showing queue counts — avoids stale localStorage flash */
+  const isBootstrapping = !initialFetchDone && !isAutoRepliedTab
 
   const displayStats = useMemo(
     () => (isBootstrapping ? null : stats ? syncStatsWithQueue(stats, allEmails) : null),
@@ -389,6 +394,23 @@ export default function EmailDashboard({
     })
   }, [userEmail, notifyParentStats])
 
+  /** Replace local queue with current Gmail Attention label list */
+  const reconcileQueue = useCallback(async () => {
+    const cached = loadQueue(userEmail)
+    const emailData = await fetchEmails(userEmail, { page_size: INBOX_PAGE_SIZE, refresh: true })
+    if (emailData.error) return
+    const nextQueue = mergeReadState(dedupeEmails(emailData.emails ?? []), cached)
+    setAllEmails(nextQueue)
+    saveQueue(userEmail, nextQueue)
+    setStats(s => {
+      if (!s) return s
+      const synced = syncStatsWithQueue(s, nextQueue)
+      saveMetrics(userEmail, synced)
+      notifyParentStats(synced)
+      return synced
+    })
+  }, [userEmail, notifyParentStats])
+
 
 
   useEffect(() => {
@@ -451,7 +473,14 @@ export default function EmailDashboard({
   useEffect(() => {
     if (!userEmail) return
     const unsubscribe = subscribeEmailStream(userEmail, {
-      onConnect: () => setLiveConnected(true),
+      onConnect: () => {
+        setLiveConnected(true)
+        if (initialFetchDoneRef.current) {
+          reconcileQueue().catch(err => {
+            console.error('[Dashboard] Queue reconcile on reconnect failed:', err)
+          })
+        }
+      },
       onDisconnect: () => setLiveConnected(false),
       onNewEmail: (card) => {
         addEmail(card)
@@ -461,6 +490,8 @@ export default function EmailDashboard({
       onEmailRead: (emailId) => applyReadState(emailId, true),
       onAutoReplied: (item) => {
         if (!isValidAutoRepliedItem(item)) return
+        const id = item.message_id || item._id
+        if (id) removeEmail(String(id))
         setAutoRepliedList(prev => {
           if (prev.some(i => i.message_id === item.message_id)) return prev
           return [item, ...prev]
@@ -493,7 +524,7 @@ export default function EmailDashboard({
       },
     })
     return () => { unsubscribe(); setLiveConnected(false) }
-  }, [userEmail, addEmail, removeEmail, applyReadState, showToast, notifyParentStats])
+  }, [userEmail, addEmail, removeEmail, applyReadState, showToast, notifyParentStats, reconcileQueue])
 
 
 

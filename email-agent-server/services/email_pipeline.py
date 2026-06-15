@@ -58,6 +58,7 @@ async def process_incoming_email_pipeline(
                     processed_label_id=processed_label_id,
                     attention_label_id=attention_label_id,
                     label_ids=label_ids,
+                    user_email=user_email,
                 )
                 session_stats.record_dropped(user_email)
                 await log_agent_event(
@@ -88,8 +89,8 @@ async def process_incoming_email_pipeline(
                         processed_label_id=processed_label_id,
                         attention_label_id=attention_label_id,
                         label_ids=label_ids,
+                        user_email=user_email,
                     )
-                    attention_cache.invalidate_email(user_email, message_id)
                     await log_agent_event(
                         user_email,
                         "auto_resolved",
@@ -112,6 +113,7 @@ async def process_incoming_email_pipeline(
                     processed_label_id=processed_label_id,
                     attention_label_id=attention_label_id,
                     label_ids=label_ids,
+                    user_email=user_email,
                 )
                 session_stats.record_dropped(user_email)
                 await log_agent_event(
@@ -150,6 +152,7 @@ async def process_incoming_email_pipeline(
                     processed_label_id=processed_label_id,
                     attention_label_id=attention_label_id,
                     label_ids=label_ids,
+                    user_email=user_email,
                 )
 
                 card = _build_auto_replied_card(email_meta, category, priority, reply_body)
@@ -168,7 +171,6 @@ async def process_incoming_email_pipeline(
                         "reply_preview": reply_body[:280],
                     },
                 )
-                attention_cache.invalidate_email(user_email, message_id)
                 await ws_manager.broadcast_to_user(
                     user_email, {"event": "auto_replied", "data": card}
                 )
@@ -207,9 +209,11 @@ async def _mark_processed(
     processed_label_id: str,
     attention_label_id: str,
     label_ids: list,
+    user_email: str | None = None,
 ) -> None:
+    had_attention = bool(attention_label_id and attention_label_id in label_ids)
     remove_ids = ["UNREAD"]
-    if attention_label_id and attention_label_id in label_ids:
+    if had_attention:
         remove_ids.append(attention_label_id)
     await asyncio.to_thread(
         modify_labels,
@@ -218,6 +222,11 @@ async def _mark_processed(
         add_label_ids=[processed_label_id] if processed_label_id else None,
         remove_label_ids=remove_ids,
     )
+    if user_email and had_attention:
+        attention_cache.invalidate_email(user_email, message_id)
+        await ws_manager.broadcast_to_user(
+            user_email, {"event": "email_removed", "id": message_id}
+        )
 
 
 async def _broadcast_metrics_update(user_email: str) -> None:
