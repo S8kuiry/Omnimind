@@ -33,6 +33,7 @@ export default function ChatPage() {
     page: number
     snippet?: string
     sectionContext?: string
+    allPages?: boolean
   } | null>(null)
   const docsFetchVersion = useRef(0)
 
@@ -180,6 +181,7 @@ export default function ChatPage() {
       page: 1,
       snippet: undefined,
       sectionContext: undefined,
+      allPages: true,
     })
     return
   }
@@ -331,6 +333,7 @@ injectUserMessage(labelMap[type])
             page={sourcePanel.page}
             snippet={sourcePanel.snippet}
             sectionContext={sourcePanel.sectionContext}
+            allPages={sourcePanel.allPages}
             userId={userId}
             chatId={chatId}
             knownDocs={docNames}
