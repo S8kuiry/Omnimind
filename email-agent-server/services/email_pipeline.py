@@ -8,6 +8,7 @@ from services.llm.auto_reply import generate_auto_reply_body
 from services.auto_reply_policy import (
     should_auto_reply,
     is_system_drop_meta,
+    is_omnimind_notification_meta,
     is_job_recruiting_meta,
     apply_triage_overrides,
 )
@@ -68,6 +69,10 @@ async def process_incoming_email_pipeline(
                     meta={"reason": "system_non_replyable"},
                 )
                 logger.info(f"System-dropped {message_id} for {user_email}")
+                return
+
+            if is_omnimind_notification_meta(email_meta, user_email):
+                logger.debug(f"Ignoring OmniMind notification {message_id} for {user_email}")
                 return
 
             if attention_label_id and attention_label_id in label_ids and not reprocess_attention:

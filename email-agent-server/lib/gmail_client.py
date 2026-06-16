@@ -186,7 +186,11 @@ def fetch_attention_labeled_emails(
     Excludes outbound SENT/DRAFT and the user's own replies.
     """
     from config import settings
-    from services.auto_reply_policy import is_outbound_queue_meta, is_system_drop_meta
+    from services.auto_reply_policy import (
+        is_outbound_queue_meta,
+        is_system_drop_meta,
+        is_omnimind_notification_meta,
+    )
 
     limit = max_results or settings.attention_list_max_results
     service = _build_service(creds)
@@ -204,6 +208,8 @@ def fetch_attention_labeled_emails(
             if is_outbound_queue_meta(parsed, user_email):
                 continue
             if is_system_drop_meta(parsed):
+                continue
+            if is_omnimind_notification_meta(parsed, user_email):
                 continue
             hydrated_cards.append(parsed)
         return hydrated_cards

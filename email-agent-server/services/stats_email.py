@@ -6,6 +6,16 @@ from email.mime.text import MIMEText
 
 from googleapiclient.discovery import build
 
+METRICS_ROLLUP_SUBJECT = "📊 Today's Email Agent Automation Metrics Rollup"
+FINAL_DAILY_SUBJECT = "Daily Email Agent Summary"
+
+# Substrings matched against subject/snippet to skip pipeline triage on self-sent stats mail.
+OMNIMIND_NOTIFICATION_MARKERS = (
+    "Daily Email Agent Summary",
+    "Today's Email Agent Automation Metrics Rollup",
+    "OmniMind Engine Summary",
+)
+
 
 def generate_metrics_html(email: str, stats: dict) -> str:
     """Email-client safe HTML dashboard report."""
@@ -103,7 +113,7 @@ def send_gmail_sync(
     creds,
     destination_email: str,
     html_body: str,
-    subject: str = "📊 Today's Email Agent Automation Metrics Rollup",
+    subject: str = METRICS_ROLLUP_SUBJECT,
 ) -> None:
     """Send HTML email via Gmail API (blocking — call via asyncio.to_thread)."""
     service = build("gmail", "v1", credentials=creds)

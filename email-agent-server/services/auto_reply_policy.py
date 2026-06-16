@@ -5,7 +5,9 @@ Only universal technical rules are hardcoded (non-replyable addresses, system ma
 """
 
 import re
+
 from config import settings
+from services.stats_email import OMNIMIND_NOTIFICATION_MARKERS
 
 # Technical: cannot reply to these — never show in attention queue
 _SYSTEM_SENDERS = ("mailer-daemon", "postmaster", "mail-daemon", "mail delivery subsystem")
@@ -166,6 +168,21 @@ def is_job_recruiting_meta(meta: dict) -> bool:
             return True
 
     return False
+
+
+def is_omnimind_notification_meta(meta: dict, user_email: str = "") -> bool:
+    """
+    Self-sent OmniMind stats / daily summary mail — never triage, auto-reply, or queue.
+    """
+    user = (user_email or "").strip().lower()
+    addr = (meta.get("from_address") or "").strip().lower()
+    if not user or addr != user:
+        return False
+    text = " ".join(
+        str(meta.get(k) or "")
+        for k in ("subject", "snippet", "body_text", "summary")
+    ).lower()
+    return any(marker.lower() in text for marker in OMNIMIND_NOTIFICATION_MARKERS)
 
 
 def is_outbound_queue_meta(meta: dict, user_email: str = "") -> bool:

@@ -21,11 +21,13 @@ from models.metrics_daily import get_today
 from models.user import list_users_with_gmail_tokens, get_cleanup_settings
 from routes.emails import _broadcast_metrics
 from services.db_retention import run_db_retention_once
-from services.stats_email import generate_metrics_html, send_gmail_sync
+from services.stats_email import (
+    FINAL_DAILY_SUBJECT,
+    generate_metrics_html,
+    send_gmail_sync,
+)
 
 logger = logging.getLogger("daily_jobs")
-
-FINAL_DAILY_SUBJECT = "🌙 Final Daily Email Agent Summary"
 
 
 async def run_gmail_cleanup_all() -> dict:
@@ -102,7 +104,7 @@ async def send_final_daily_stats() -> dict:
                 creds,
                 user_email,
                 html,
-                subject=FINAL_DAILY_SUBJECT,
+                FINAL_DAILY_SUBJECT,
             )
             summary["users_notified"] += 1
             logger.info(f"[daily] Final stats email sent to {user_email}")
