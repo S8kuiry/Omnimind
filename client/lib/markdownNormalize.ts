@@ -1225,3 +1225,155 @@ export function normalizeMarkdown(raw: string, opts?: { forStream?: boolean }): 
   s = restoreCodeBlocks(s, protected0.blocks)
   return s.trim()
 }
+
+const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/
+const PHONE_RE = /\+?\d[\d\s-]{7,}\d/
+const CITY_COUNTRY_RE = /[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*,\s*(?:[A-Z][a-zA-Z]+\s*)+/
+
+/** Split PDF/RAG text that arrived as one jammed line into readable blocks. */
+function repairJammedDocumentText(s: string): string {
+  let t = s.replace(/\r\n/g, '\n').trim()
+  if (!t) return t
+
+  // Filename / page markers glued to body: "Cover_Letter . Page 1 Name..."
+  t = t.replace(
+    /^([A-Za-z0-9_.\s-]{6,}?)\s*\.\s*(Page\s+\d+)\s+/i,
+    '$1\n\n$2\n\n',
+  )
+  t = t.replace(
+    /^([A-Za-z0-9_.\s-]{6,}?)\s*:\s*(Page\s+\d+)\s*/i,
+    '$1\n\n$2\n\n',
+  )
+  t = t.replace(/(\bPage\s+\d+)\s+(?=[A-Z])/gi, '$1\n\n')
+
+  // Name + city/country before contact: "Subharthy Kuiry Kolkata, India email@..."
+  t = t.replace(
+    new RegExp(
+      `([A-Z][a-z]+(?:\\s+[A-Z][a-z]+){1,3})\\s+(${CITY_COUNTRY_RE.source})\\s+(?=${EMAIL_RE.source})`,
+    ),
+    '$1\n\n$2\n\n',
+  )
+
+  // City/country alone before email
+  t = t.replace(
+    new RegExp(`(${CITY_COUNTRY_RE.source})\\s+(?=${EMAIL_RE.source})`),
+    '$1\n\n',
+  )
+
+  // Contact row: email | phone
+  t = t.replace(
+    new RegExp(`(${EMAIL_RE.source})\\s*\\|\\s*(${PHONE_RE.source})`),
+    '$1 | $2',
+  )
+  t = t.replace(
+    new RegExp(`(${EMAIL_RE.source})\\s+(?=Dear\\b)`, 'i'),
+    '$1\n\n',
+  )
+  t = t.replace(
+    new RegExp(`(${EMAIL_RE.source}\\s*\\|\\s*${PHONE_RE.source})\\s+(?=Dear\\b)`, 'i'),
+    '$1\n\n',
+  )
+
+  // Salutation glued to prior/next text
+  t = t.replace(
+    /\s+(Dear\s+(?:Hiring\s+Manager|[A-Za-z][A-Za-z.\s]{0,40}),)\s*/gi,
+    '\n\n$1\n\n',
+  )
+  t = t.replace(
+    /(Dear\s+(?:Hiring\s+Manager|[A-Za-z][A-Za-z.\s]{0,40}),)\s*(?=[A-Z])/gi,
+    '$1\n\n',
+  )
+
+  // Missing spaces after common words (deploymentwhile → deployment while)
+  t = t.replace(
+    /([a-z])(while|when|with|the|and|from|during|after|before|through|into|onto|that|this|where|which)\b/gi,
+    '$1 $2',
+  )
+
+  // Tech/version glue: Next.js15 → Next.js 15
+  t = t.replace(/([A-Za-z.])(\d{2,4})(?=\b)/g, '$1 $2')
+
+  // camelCase boundaries: KuiryKolkata → Kuiry Kolkata
+  t = t.replace(/([a-z])([A-Z])/g, '$1 $2')
+
+  // Sentence boundaries → paragraph breaks (conservative: period + space + capital)
+  t = t.replace(/([.!?])\s+(?=[A-Z"([])/g, '$1\n\n')
+
+  // Section labels: **Skills:** React → line break before label
+  t = t.replace(/\s+(\*\*[A-Za-z][A-Za-z0-9 /&]+:\*\*)/g, '\n\n$1 ')
+
+  return t
+}
+
+/** Letter/resume formatting for export — broader trigger than chat `looksLikeLetter`. */
+function formatFormalProseForExport(s: string): string {
+  if (!/\bdear\b/i.test(s) && !/\b(experience|education|skills|summary)\s*:/i.test(s)) {
+    return s
+  }
+  let t = s
+
+  t = t.replace(/^(#{1,6}[^\n]{8,240}?)(Dear\b)/gm, '$1\n\n$2')
+  t = t.replace(/(#{1,6}[^\n]{8,240}?)\s*(Dear\b)/g, '$1\n\n$2')
+  t = t.replace(/,\s*(subject\s*:)/gi, ',\n\n$1')
+  t = t.replace(
+    /(Dear[^\n]{2,80}?),\s*(I am writing|I'm writing|I build|This is to|With reference|Regarding)\b/gi,
+    '$1,\n\n$2',
+  )
+  t = t.replace(/([.?!])\s*(During my|In my|At my|While at|Previously at)\b/gi, '$1\n\n$2')
+  t = t.replace(
+    /\s+(I believe that|I would greatly appreciate|Thank you for your time and consideration\.)/gi,
+    '\n\n$1',
+  )
+  t = t.replace(/([.?!])\s*(Best regards,?|Sincerely,?|Yours faithfully,?)/gi, '$1\n\n$2')
+  t = t.replace(/([.?!])\s*(Thank you for your time and consideration\.)/gi, '$1\n\n$2')
+
+  return t.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * Collapse PDF chunk boundaries that split mid-sentence onto their own line.
+ * e.g. "applications\n\nusing\n\nReact" → "applications using React"
+ */
+export function normalizeChunkedPageText(raw: string): string {
+  let s = raw.replace(/\r\n/g, '\n').trim()
+  if (!s) return s
+
+  // Double-newline wrapped short lowercase word (chunk glue)
+  s = s.replace(/\n\n([a-z]{1,14})\n\n/g, ' $1 ')
+  // Single newline mid-sentence
+  s = s.replace(/([a-z,;])\n([a-z])/g, '$1 $2')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return s.trim()
+}
+
+/**
+ * Universal preprocessor for Word/PDF export from document panel text.
+ * Splits jammed PDF excerpts, fixes glued words, and preserves markdown structure.
+ */
+export function prepareDocumentExportText(raw: string): string {
+  let s = raw.replace(/\r\n/g, '\n').trim()
+  if (!s) return s
+
+  s = s.replace(/\[Source:[^\]]*\]/gi, '')
+  s = s.replace(/\s*\[Page\s*[\d‑\-–—]+\]/gi, '')
+
+  const structuredLines = s.split('\n').filter(l => l.trim()).length
+  if (structuredLines <= 3 || s.replace(/\n/g, ' ').length / Math.max(structuredLines, 1) > 120) {
+    s = repairJammedDocumentText(s)
+  }
+
+  s = repairJammedProseBlocks(s)
+  s = repairUniversalModelMarkdown(s)
+  s = formatFormalProseForExport(s)
+  s = fixGluedHeadings(s)
+  s = repairSplitBoldMarkers(s)
+
+  // Ensure markdown headings/list items start on their own line
+  s = s.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2')
+  s = s.replace(/([^\n])\n([-*]\s)/g, '$1\n\n$2')
+  s = s.replace(/([^\n])\n(\d+\.\s)/g, '$1\n\n$2')
+
+  s = s.replace(/[ \t]+$/gm, '')
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return s.trim()
+}

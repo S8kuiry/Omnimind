@@ -2,7 +2,7 @@ import { normalizeDocName } from './docName'
 
 /** Backend base URL — must be set on Vercel at build time (`NEXT_PUBLIC_*`). */
 export function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8000'
+  return process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:8001'
 }
 
 const API = getApiBase()
