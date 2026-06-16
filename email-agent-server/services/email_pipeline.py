@@ -7,9 +7,10 @@ from services.llm.categorizer_light import triage_email_light
 from services.llm.auto_reply import generate_auto_reply_body
 from services.auto_reply_policy import (
     should_auto_reply,
-    is_system_drop_meta,
+    is_hard_system_drop_meta,
     is_omnimind_notification_meta,
     is_job_recruiting_meta,
+    is_safe_to_silently_process,
     apply_triage_overrides,
 )
 from models.event import log_agent_event
@@ -51,8 +52,8 @@ async def process_incoming_email_pipeline(
 
     async with pipeline_semaphore:
         try:
-            # System / non-replyable — never show user; also cleans mislabeled Attention mail
-            if is_system_drop_meta(email_meta):
+            # Hard system failures only (bounces, mailer-daemon) — not no-reply senders
+            if is_hard_system_drop_meta(email_meta):
                 await _mark_processed(
                     creds=creds,
                     message_id=message_id,
@@ -66,7 +67,7 @@ async def process_incoming_email_pipeline(
                     user_email,
                     "spam_blocked",
                     message_id=message_id,
-                    meta={"reason": "system_non_replyable"},
+                    meta={"reason": "system_delivery_failure"},
                 )
                 logger.info(f"System-dropped {message_id} for {user_email}")
                 return
@@ -78,6 +79,33 @@ async def process_incoming_email_pipeline(
             if attention_label_id and attention_label_id in label_ids and not reprocess_attention:
                 return
 
+            triage = await triage_email_light(email_meta)
+            triage = apply_triage_overrides(email_meta, triage)
+            category = triage.get("category", "work")
+            priority = triage.get("priority", "medium")
+            needs_manual = triage.get("needs_manual_review", True)
+
+            if is_safe_to_silently_process(
+                email_meta, category=category, needs_manual=needs_manual
+            ):
+                await _mark_processed(
+                    creds=creds,
+                    message_id=message_id,
+                    processed_label_id=processed_label_id,
+                    attention_label_id=attention_label_id,
+                    label_ids=label_ids,
+                    user_email=user_email,
+                )
+                session_stats.record_dropped(user_email)
+                await log_agent_event(
+                    user_email,
+                    "spam_blocked",
+                    message_id=message_id,
+                    meta={"category": category, "reason": "safe_to_silently_process"},
+                )
+                logger.info(f"Silently processed {message_id} ({category}) for {user_email}")
+                return
+
             thread_id = email_meta.get("threadId") or ""
             if thread_id and not is_job_recruiting_meta(email_meta):
                 already_handled = await asyncio.to_thread(
@@ -87,7 +115,9 @@ async def process_incoming_email_pipeline(
                     processed_label_id,
                     message_id,
                 )
-                if already_handled:
+                if already_handled and is_safe_to_silently_process(
+                    email_meta, category=category, needs_manual=needs_manual
+                ):
                     await _mark_processed(
                         creds=creds,
                         message_id=message_id,
@@ -104,30 +134,6 @@ async def process_incoming_email_pipeline(
                     )
                     logger.info(f"Thread follow-up {message_id} marked processed (already handled)")
                     return
-
-            triage = await triage_email_light(email_meta)
-            triage = apply_triage_overrides(email_meta, triage)
-            category = triage.get("category", "work")
-            priority = triage.get("priority", "medium")
-            needs_manual = triage.get("needs_manual_review", True)
-
-            if category in ["spam", "newsletter"]:
-                await _mark_processed(
-                    creds=creds,
-                    message_id=message_id,
-                    processed_label_id=processed_label_id,
-                    attention_label_id=attention_label_id,
-                    label_ids=label_ids,
-                    user_email=user_email,
-                )
-                session_stats.record_dropped(user_email)
-                await log_agent_event(
-                    user_email,
-                    "spam_blocked",
-                    message_id=message_id,
-                    meta={"category": category},
-                )
-                return
 
             allow_auto, auto_reason = should_auto_reply(
                 email_meta,
@@ -295,6 +301,8 @@ async def _route_to_attention(
 
 def _build_card(email_meta: dict, category: str, priority: str) -> dict:
     message_id = email_meta.get("id")
+    label_ids = email_meta.get("labelIds") or []
+    is_read = "UNREAD" not in label_ids
     return {
         "_id": message_id,
         "provider_message_id": message_id,
@@ -311,6 +319,7 @@ def _build_card(email_meta: dict, category: str, priority: str) -> dict:
         "priority": priority,
         "date": email_meta.get("date", ""),
         "provider": "gmail",
+        "is_read": is_read,
     }
 
 

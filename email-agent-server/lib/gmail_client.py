@@ -188,7 +188,7 @@ def fetch_attention_labeled_emails(
     from config import settings
     from services.auto_reply_policy import (
         is_outbound_queue_meta,
-        is_system_drop_meta,
+        is_hard_system_drop_meta,
         is_omnimind_notification_meta,
     )
 
@@ -207,7 +207,7 @@ def fetch_attention_labeled_emails(
                 continue
             if is_outbound_queue_meta(parsed, user_email):
                 continue
-            if is_system_drop_meta(parsed):
+            if is_hard_system_drop_meta(parsed):
                 continue
             if is_omnimind_notification_meta(parsed, user_email):
                 continue

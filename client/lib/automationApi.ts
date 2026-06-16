@@ -295,7 +295,7 @@ export function normalizeBufferCard(raw: BufferNotification & Record<string, unk
     gmail_link: messageId ? `https://mail.google.com/mail/u/0/#inbox/${messageId}` : '',
     user_overrode: false,
     user_action: null,
-    is_read: false,
+    is_read: Boolean(raw.is_read ?? false),
     is_trashed: false,
     alert_sent_to_user: true,
     processed_at: date,

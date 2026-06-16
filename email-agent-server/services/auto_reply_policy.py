@@ -32,10 +32,10 @@ _DELIVERY_FAILURE_SUBJECT_RE = re.compile(
 # Domains alone are NOT enough (avoids blocking all LinkedIn mail).
 
 _JOB_STRONG_RE = re.compile(
-    r"job\s+(?:opening|opportunity|offer|alert|posting|application|position)\b"
+    r"job\s+(?:opening|opportunity|offer|alert|posting|application|position|s?\s+at)\b"
     r"|(?:we'?re|we are)\s+hiring\b"
     r"|hiring\s+for\s+(?:a\s+)?(?:role|position|engineer|developer|analyst|manager|intern)"
-    r"|(?:apply|application)\s+(?:now|here|today|link|via|online|on\s+our)"
+    r"|(?:apply|application)\s+(?:now|here|today|link|via|online|on\s+our|to\s+jobs?\b)"
     r"|(?:invited?\s+to\s+apply|please\s+apply|submit\s+your\s+(?:cv|resume|application))"
     r"|(?:interview|screening)\s+(?:invite|invitation|scheduled|request|slot|call)"
     r"|(?:shortlisted|selected)\s+for\s+(?:the\s+)?(?:role|position|interview|next\s+round)"
@@ -43,7 +43,9 @@ _JOB_STRONG_RE = re.compile(
     r"|(?:campus|off-?campus)\s+(?:hire|hiring|placement|drive)"
     r"|(?:ctc|call\s+letter|offer\s+letter)\b"
     r"|(?:view|see)\s+(?:this\s+)?(?:job|opening|role)\s+(?:at|on)\b"
-    r"|(?:found|matched|recommended)\s+(?:a\s+)?job\s+(?:for|matching)\b",
+    r"|(?:found|matched|recommended)\s+(?:a\s+)?job\s+(?:for|matching)\b"
+    r"|\b\d+\s+new\s+\w+(?:\s+\w+){0,4}\s+(?:vacanc(?:y|ies)|opening|role|position)\b"
+    r"|\b(?:full[\s-]?stack|frontend|backend|web|software|data|devops)\s+(?:developer|engineer)\b",
     re.I,
 )
 
@@ -104,7 +106,7 @@ def is_replyable_address(from_address: str) -> bool:
     return not any(m in addr for m in _NOREPLY_MARKERS)
 
 
-def is_system_drop(
+def is_hard_system_drop(
     from_address: str,
     subject: str,
     snippet: str,
@@ -113,8 +115,8 @@ def is_system_drop(
     body_text: str = "",
 ) -> bool:
     """
-    Mail that must never reach the attention queue.
-    Silently mark Processed — no reply attempt.
+    True delivery/system failures only — safe to silently mark Processed.
+    No-reply senders are NOT dropped here; important no-reply mail routes to Attention.
     """
     addr = (from_address or "").lower()
     name = (from_name or "").lower()
@@ -122,7 +124,7 @@ def is_system_drop(
 
     if any(marker in name for marker in _SYSTEM_FROM_NAMES):
         return True
-    if not is_replyable_address(from_address):
+    if any(s in addr for s in _SYSTEM_SENDERS):
         return True
     if _DELIVERY_FAILURE_SUBJECT_RE.search(subject or ""):
         return True
@@ -131,15 +133,20 @@ def is_system_drop(
     return bool(_DELIVERY_FAILURE_RE.search(combined))
 
 
-def is_system_drop_meta(meta: dict) -> bool:
-    """Evaluate a Gmail metadata dict or attention card for silent system drop."""
-    return is_system_drop(
+def is_hard_system_drop_meta(meta: dict) -> bool:
+    """Evaluate metadata for hard system-only silent Processed."""
+    return is_hard_system_drop(
         meta.get("from_address") or "",
         meta.get("subject") or "",
         meta.get("snippet") or "",
         from_name=meta.get("from_name") or "",
         body_text=meta.get("body_text") or meta.get("summary") or "",
     )
+
+
+def is_system_drop_meta(meta: dict) -> bool:
+    """Backward-compatible alias — only hard system failures are silently dropped."""
+    return is_hard_system_drop_meta(meta)
 
 
 def _email_text_blob(meta: dict) -> str:
@@ -166,7 +173,32 @@ def is_job_recruiting_meta(meta: dict) -> bool:
     if re.search(r"\b(recruiter|talent acquisition|staffing|hr)\b", name, re.I):
         if _JOB_BOARD_HINT_RE.search(blob):
             return True
+    if re.search(r"\b(?:indeed|linkedin|naukri|foundit|glassdoor|monster|shine)\b", name, re.I):
+        if _JOB_BOARD_HINT_RE.search(blob):
+            return True
 
+    return False
+
+
+def is_safe_to_silently_process(
+    email_meta: dict,
+    *,
+    category: str,
+    needs_manual: bool,
+) -> bool:
+    """
+    Only mail we can confidently ignore gets Processed without attention.
+    No-reply is allowed here when content is clearly ignorable (spam/newsletter).
+    When uncertain, return False so the message routes to Attention instead.
+    """
+    if is_job_recruiting_meta(email_meta):
+        return False
+    if needs_manual:
+        return False
+    if category == "spam":
+        return True
+    if category == "newsletter":
+        return True
     return False
 
 
@@ -204,6 +236,8 @@ def apply_triage_overrides(email_meta: dict, triage: dict) -> dict:
     result = dict(triage)
     if is_job_recruiting_meta(email_meta):
         result["needs_manual_review"] = True
+        if result.get("category") in ("newsletter", "spam"):
+            result["category"] = "work"
         if result.get("priority") == "low":
             result["priority"] = "medium"
     return result

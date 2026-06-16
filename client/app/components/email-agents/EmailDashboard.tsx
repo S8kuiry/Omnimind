@@ -69,15 +69,15 @@ function matchesFilters(email: EmailItem, category: string, priority: string): b
   return true
 }
 
-/** Preserve is_read from localStorage when server list does not carry read state. */
+/** Merge read state: Gmail UNREAD label, OmniMind open, or localStorage cache. */
 function mergeReadState(fetched: EmailItem[], cached: EmailItem[]): EmailItem[] {
   const readIds = new Set(
     cached.filter(e => e.is_read).flatMap(e => [e._id, e.gmail_message_id].filter(Boolean))
   )
-  if (readIds.size === 0) return fetched
   return fetched.map(email => {
     const id = email._id || email.gmail_message_id
-    return readIds.has(id) ? { ...email, is_read: true } : email
+    const read = email.is_read || (id != null && readIds.has(id))
+    return read ? { ...email, is_read: true } : email
   })
 }
 
