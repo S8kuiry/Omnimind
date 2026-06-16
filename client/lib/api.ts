@@ -152,3 +152,25 @@ export async function fetchDocumentPage(
   }
   return res.json() as Promise<{ doc_name: string; page: number; text: string; highlight: string }>
 }
+
+export async function fetchDocumentFull(
+  docName: string,
+  userId: string,
+  chatId: string,
+) {
+  const resolved = normalizeDocName(docName)
+  const params = new URLSearchParams({ user_id: userId, chat_id: chatId })
+  const res = await fetch(
+    `${API}/document/${encodeURIComponent(resolved)}/full?${params}`,
+  )
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`${res.status}: ${detail || res.statusText}`)
+  }
+  return res.json() as Promise<{
+    doc_name: string
+    pages: { page: number; text: string }[]
+    text: string
+    page_count: number
+  }>
+}

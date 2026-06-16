@@ -19,6 +19,7 @@ from services.vector_store import (
     delete_document,
     cleanup_expired_documents,
     get_page_chunks,
+    get_all_document_pages,
     resolve_doc_name,
     list_doc_names_in_namespace,
     retrieve_chunks_for_question,
@@ -292,6 +293,44 @@ async def get_document_page(
     except Exception as exc:
         print(f"[get_document_page] {doc_name} p{page} chat={chat_id}: {exc}")
         raise HTTPException(500, f"Failed to load document page: {exc}") from exc
+
+
+@app.get("/document/{doc_name}/full")
+async def get_document_full(
+    doc_name: str,
+    user_id: str,
+    chat_id: str = "",
+):
+    try:
+        scope = chat_id if chat_id else user_id
+        norm = _normalize_doc_name(doc_name)
+        resolved = resolve_doc_name(norm, scope)
+        pages = get_all_document_pages(resolved, scope)
+        if not pages:
+            try:
+                available = list_doc_names_in_namespace(scope)
+            except Exception as exc:
+                print(f"[get_document_full] list docs failed: {exc}")
+                available = []
+            raise HTTPException(
+                404,
+                f"No content found for {doc_name} in this chat. "
+                f"Indexed documents: {available or 'none — upload PDF in this chat'}",
+            )
+        parts: list[str] = []
+        for pg in pages:
+            parts.append(f"— Page {pg['page']} —\n\n{pg['text']}")
+        return {
+            "doc_name": resolved,
+            "pages": pages,
+            "text": "\n\n".join(parts),
+            "page_count": len(pages),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[get_document_full] {doc_name} chat={chat_id}: {exc}")
+        raise HTTPException(500, f"Failed to load document: {exc}") from exc
 
 
 # ── Feature endpoints ──────────────────────────────────────────────

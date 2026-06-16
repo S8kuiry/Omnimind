@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { fetchDocumentPage } from '@/lib/api'
+import { fetchDocumentPage, fetchDocumentFull } from '@/lib/api'
 import { resolveDocName } from '@/lib/docName'
 import { normalizeChunkedPageText, prepareDocumentExportText } from '@/lib/markdownNormalize'
 import { findRelevantExcerpt } from '@/lib/sectionSources'
@@ -673,20 +673,10 @@ export default function DocumentSourcePanel({
     if (!chatId) { setText('Chat session not ready yet.'); setLoading(false); return }
 
     if (allPages) {
-      ;(async () => {
-        let fullText = '', p = 1
-        while (true) {
-          setLoadingPage(p)
-          try {
-            const data = await fetchDocumentPage(resolvedDoc, p, userId, chatId)
-            fullText += (p > 1 ? '\n\n' : '') + `— Page ${p} —\n\n${data.text}`
-            p++
-          } catch { break }
-        }
-        setLoadingPage(null)
-        setText(fullText.trim() || 'No content found.')
-        setLoading(false)
-      })()
+      fetchDocumentFull(resolvedDoc, userId, chatId)
+        .then(data => setText(data.text.trim() || 'No content found.'))
+        .catch(err => setText(formatLoadError(err)))
+        .finally(() => setLoading(false))
       return
     }
 

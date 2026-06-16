@@ -474,6 +474,38 @@ def get_page_chunks(
     return []
 
 
+def get_all_document_pages(doc_name: str, namespace: str) -> list[dict]:
+    """
+    Returns every indexed page for a document in one Pinecone list + fetch.
+    [{ "page": int, "text": str }, ...] sorted by page number.
+    """
+    index = _get_index()
+    resolved = resolve_doc_name(doc_name, namespace)
+    doc_prefix = f"{namespace}_{resolved}_"
+    ids = _list_vector_ids(index, namespace, prefix=doc_prefix)
+    if not ids:
+        return []
+
+    chunks = _fetch_chunks_by_ids(index, ids, namespace, source=resolved)
+    if not chunks:
+        return []
+
+    by_page: dict[int, list[dict]] = {}
+    for chunk in chunks:
+        page_num = chunk.get("page") or 0
+        if page_num <= 0:
+            continue
+        by_page.setdefault(page_num, []).append(chunk)
+
+    pages: list[dict] = []
+    for page_num in sorted(by_page.keys()):
+        page_chunks = sorted(by_page[page_num], key=lambda c: c["chunk_id"])
+        text = "\n\n".join(c["text"] for c in page_chunks if c.get("text"))
+        if text.strip():
+            pages.append({"page": page_num, "text": text.strip()})
+    return pages
+
+
 def retrieve_chunks_for_question(
     question: str,
     namespace: str,
