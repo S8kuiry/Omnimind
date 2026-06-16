@@ -55,6 +55,24 @@ _JOB_BOARD_HINT_RE = re.compile(
     re.I,
 )
 
+# Post-apply confirmations (Indeed "Application submitted", etc.) — no action needed.
+_JOB_APPLICATION_FYI_RE = re.compile(
+    r"application\s+(?:submitted|received|sent|confirmed)"
+    r"|your\s+application\s+(?:has\s+been|was)\s+(?:sent|submitted|received)"
+    r"|successfully\s+applied"
+    r"|application\s+confirmation"
+    r"|we\s+received\s+your\s+application"
+    r"|(?:the\s+)?following\s+items\s+were\s+sent\b",
+    re.I,
+)
+_JOB_APPLICATION_REJECTION_RE = re.compile(
+    r"application\s+(?:rejected|declined|unsuccessful|denied)"
+    r"|not\s+(?:selected|shortlisted|chosen)\s+for"
+    r"|(?:didn't|did not|was not)\s+(?:select|shortlist|choose)"
+    r"|unfortunately.{0,40}application",
+    re.I,
+)
+
 _JOB_BOARD_SENDERS = (
     "jobs.linkedin.com",
     "jobalerts.linkedin.com",
@@ -156,11 +174,36 @@ def _email_text_blob(meta: dict) -> str:
     )
 
 
+def is_job_application_fyi_meta(meta: dict) -> bool:
+    """
+    Post-apply confirmations from job boards — already acted on, safe to silently process.
+    Rejections and interview invites are excluded.
+    """
+    blob = _email_text_blob(meta)
+    if _JOB_APPLICATION_REJECTION_RE.search(blob):
+        return False
+    if not _JOB_APPLICATION_FYI_RE.search(blob):
+        return False
+
+    addr = (meta.get("from_address") or "").lower()
+    name = (meta.get("from_name") or "").lower()
+    if any(marker in addr for marker in _JOB_BOARD_SENDERS):
+        return True
+    if re.search(r"\b(?:indeed|linkedin|naukri|foundit|glassdoor|monster|shine)\b", name, re.I):
+        return True
+    if _JOB_BOARD_HINT_RE.search(blob):
+        return True
+    return False
+
+
 def is_job_recruiting_meta(meta: dict) -> bool:
     """
     Job offers / apply invites → attention queue, never auto-reply.
     Content-first so routine mail from job sites can still auto-reply when appropriate.
     """
+    if is_job_application_fyi_meta(meta):
+        return False
+
     blob = _email_text_blob(meta)
     if _JOB_STRONG_RE.search(blob):
         return True
@@ -191,6 +234,8 @@ def is_safe_to_silently_process(
     No-reply is allowed here when content is clearly ignorable (spam/newsletter).
     When uncertain, return False so the message routes to Attention instead.
     """
+    if is_job_application_fyi_meta(email_meta):
+        return True
     if is_job_recruiting_meta(email_meta):
         return False
     if needs_manual:
