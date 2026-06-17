@@ -35,7 +35,12 @@ from models.metrics_daily import get_rollup, get_today
 from services.attention_cache import attention_cache
 from services.ws_manager import ws_manager
 from services.email_pipeline import process_incoming_email_pipeline, _build_card
-from services.auto_reply_policy import is_hard_system_drop_meta, is_outbound_queue_meta, is_omnimind_notification_meta
+from services.auto_reply_policy import (
+    is_hard_system_drop_meta,
+    is_job_application_fyi_meta,
+    is_outbound_queue_meta,
+    is_omnimind_notification_meta,
+)
 from services.session_stats import session_stats
 from services.llm.summarizer import generate_full_summary, regenerate_draft_with_tone
 
@@ -95,13 +100,17 @@ def _partition_attention_cards(
     cards: list[dict],
     user_email: str,
 ) -> tuple[list[dict], list[str]]:
-    """Split into keep vs purge (system drops + outbound/sent mislabeled as Attention)."""
+    """Split into keep vs purge (system drops, job FYI, outbound/sent mislabeled as Attention)."""
     keep: list[dict] = []
     purge_ids: list[str] = []
     for card in cards:
         if is_omnimind_notification_meta(card, user_email):
             continue
-        if is_hard_system_drop_meta(card) or is_outbound_queue_meta(card, user_email):
+        if (
+            is_hard_system_drop_meta(card)
+            or is_outbound_queue_meta(card, user_email)
+            or is_job_application_fyi_meta(card)
+        ):
             msg_id = card.get("id") or card.get("provider_message_id") or card.get("_id")
             if msg_id:
                 purge_ids.append(str(msg_id))
