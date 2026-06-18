@@ -216,6 +216,12 @@ def _is_indeed_or_naukri_sender(meta: dict) -> bool:
     return bool(re.search(r"\b(?:indeed|naukri)\b", name, re.I))
 
 
+def _is_indeed_apply_confirmation_sender(meta: dict) -> bool:
+    """Indeed's post-application confirmation address — not job alerts or interviews."""
+    addr = (meta.get("from_address") or "").strip().lower()
+    return bool(addr) and addr.startswith("indeedapply@")
+
+
 def is_job_application_fyi_meta(meta: dict) -> bool:
     """
     Post-apply confirmations from job boards — already acted on, safe to silently process.
@@ -226,6 +232,9 @@ def is_job_application_fyi_meta(meta: dict) -> bool:
         return False
     if _JOB_ACTIONABLE_RE.search(blob):
         return False
+
+    if _is_indeed_apply_confirmation_sender(meta):
+        return True
 
     if _JOB_APPLICATION_FYI_RE.search(blob) and _is_major_job_board_sender(meta):
         return True
