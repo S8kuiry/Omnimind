@@ -27,7 +27,6 @@ ALLOWED_MODELS = {
     "llama-3.1-8b-instant",
 
     # Strong general-purpose
-    "llama-3.3-70b-versatile",
     "qwen/qwen3-32b",
 
     # Reasoning-focused
